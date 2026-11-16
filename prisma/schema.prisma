@@ -1,0 +1,195 @@
+// Prisma schema for MainStreet Shield (new repo, separate from spaceworker)
+// Generator and datasource
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Core identity (MainStreet Shield users)
+// ---------------------------------------------------------------------------
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  password  String?   // bcrypt hash
+  role      String    @default("user") // "user" | "admin"
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  shieldVms     ShieldLinuxVM[]
+  signupInvites SignupInvite[] @relation("InviteCreatedBy")
+  inviteUsedBy  SignupInvite[] @relation("InviteUsedBy")
+  referrals     Referral[]     @relation("Referrer")
+  referredBy    Referral[]     @relation("Referred")
+  company       Company?
+  workflows     Workflow[]
+  contextDocSteps ContextDocStep[]
+}
+
+// ---------------------------------------------------------------------------
+// Shield Linux VM — the real Linux OS with GUI, hard-capped so it can't
+// starve the host VPS
+// ---------------------------------------------------------------------------
+model ShieldLinuxVM {
+  id          String   @id @default(cuid())
+  userId      String
+  label       String   @default("shield-lab")
+  state       String   @default("stopped") // stopped | starting | running | stopping | failed
+  vncPort     Int      @default(5901)
+  ramMb       Int      @default(4096)
+  vcpu        Int      @default(2)
+  diskGb      Int      @default(60)
+  vmIp        String?
+  sshPort     Int?
+  startedAt   DateTime?
+  stoppedAt   DateTime?
+  vncPassword String?  // random per-session, never logged
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vncAccess VncAccess?
+}
+
+// ---------------------------------------------------------------------------
+// Admin invite tokens for MainStreet Shield signups
+// ---------------------------------------------------------------------------
+model SignupInvite {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  email     String?
+  usedById  String?
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdBy String   // admin userId who created the invite
+  createdAt DateTime @default(now())
+
+  usedBy User? @relation("InviteUsedBy", fields: [usedById], references: [id], onDelete: SetNull)
+  creator User @relation("InviteCreatedBy", fields: [createdBy], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// Company onboarding — businesses that want to secure their assets
+// ---------------------------------------------------------------------------
+model Company {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  name        String
+  domain      String?
+  description String?
+  status      String   @default("onboarding") // onboarding | active | paused
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets CompanyAsset[]
+  workflows Workflow[]
+}
+
+// Assets a company wants secured / tested
+model CompanyAsset {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  type        String   @default("web") // web | api | network | mobile
+  target      String   // domain, IP, URL
+  inScope     Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Workflows — test workflows humans can create and run
+// ---------------------------------------------------------------------------
+model Workflow {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  description String?
+  status      String   @default("draft") // draft | active | completed | archived
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id])
+  steps     WorkflowStep[]
+}
+
+// ---------------------------------------------------------------------------
+// Workflow steps — individual steps within a workflow
+// ---------------------------------------------------------------------------
+model WorkflowStep {
+  id          String   @id @default(cuid())
+  workflowId  String
+  name        String
+  order       Int
+  status      String   @default("pending") // pending | running | completed | failed
+  tool        String?  // e.g. "nmap", "nuclei", "manual"
+  target      String?
+  result      String?
+  createdAt   DateTime @default(now())
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Referrals — referral flow for signups
+// ---------------------------------------------------------------------------
+model Referral {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  referrerId String
+  referredId String?
+  status    String   @default("pending") // pending | claimed | used
+  createdAt DateTime @default(now())
+
+  referrer   User @relation("Referrer", fields: [referrerId], references: [id])
+  referred   User? @relation("Referred", fields: [referredId], references: [id], onDelete: SetNull)
+}
+
+// ---------------------------------------------------------------------------
+// VNC access — random per-session password, cline always-access
+// ---------------------------------------------------------------------------
+model VncAccess {
+  id          String   @id @default(cuid())
+  vmId        String   @unique
+  password    String   // random per-session, encrypted
+  clineToken  String?  // cline always-access token
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vm ShieldLinuxVM @relation(fields: [vmId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Kill switch state — admin freeze stops all Shield VMs immediately
+// ---------------------------------------------------------------------------
+model ShieldKillSwitch {
+  id          String   @id @default(cuid()) // singleton
+  frozen      Boolean  @default(false)
+  reason      String?
+  frozenBy    String?
+  frozenAt    DateTime?
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// ContextDocStep — audit trail for all Cline VM actions (human approvals)
+// ---------------------------------------------------------------------------
+model ContextDocStep {
+  id        String   @id @default(cuid())
+  userId    String
+  stepType  String   // e.g. "CLINE_VM_COMMAND_APPROVAL", "CLINE_VM_SESSION_START", "CLINE_VM_SESSION_END"
+  content   String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
