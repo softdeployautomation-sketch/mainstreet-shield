@@ -6,7 +6,7 @@ set -euo pipefail
 DOMAIN="mainstreetmint.click"
 APP_PORT="3000"
 VNC_PORT="5901"
-WEBSOCKIFY_PORT="6901"
+WEBSOCKIFY_PORT="6081"
 
 echo "[setup-nginx-vhost] Installing nginx if missing..."
 if ! command -v nginx >/dev/null 2>&1; then
