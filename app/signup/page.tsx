@@ -1,119 +1,125 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-
+import { cookies } from "next/headers";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
-  title: "Signup — MainStreet Shield",
+  title: "Request Access — MainStreet Shield",
 };
 
 export const dynamic = "force-dynamic";
 
+const REFERRAL_COOKIE = "sw_ref";
+
 export default async function SignupPage({
   searchParams,
 }: {
-  searchParams: { [key: string]: string | string[] | undefined };
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const session = await getSession();
-  if (session) redirect("/dashboard");
+  if (await getSession()) redirect("/dashboard");
 
-  const referralCode =
-    typeof searchParams.ref === "string" ? searchParams.ref : undefined;
+  const cookieStore = await cookies();
+  const refCookie = cookieStore.get(REFERRAL_COOKIE)?.value;
+  const resolvedSearchParams = await searchParams;
+  const refQuery = Array.isArray(resolvedSearchParams.ref)
+    ? resolvedSearchParams.ref[0]
+    : resolvedSearchParams.ref;
 
-  // Validate referral code if provided
-  let referral = null;
-  if (referralCode) {
-    referral = await db.referral.findUnique({
-      where: { code: referralCode },
-    });
-    if (!referral || referral.status !== "pending") {
-      referral = null;
-    }
+  let hasAccess = refCookie ? await hasAccessGate(refCookie) : false;
+
+  if (!hasAccess && refQuery) {
+    hasAccess = await hasAccessGate(refQuery);
+    if (!hasAccess) redirect("/?error=referral_required");
   }
 
+  if (!hasAccess) redirect("/?error=referral_required");
+
   return (
-    <div className="flex flex-col h-full p-4 bg-zinc-950 text-zinc-100">
-      <div className="flex items-center gap-2 mb-6">
-        <span className="text-emerald-400 font-mono text-sm">›_</span>
-        <h1 className="text-xl font-semibold">Create MainStreet Shield Account</h1>
-      </div>
+    <div className="min-h-screen bg-[#0a0a0a] text-[#e5e5e5] flex flex-col">
+      <nav className="sticky top-0 z-50 border-b border-[#1a1a1a] bg-[#0a0a0a]/80 backdrop-blur py-3 px-4">
+        <div className="mx-auto max-w-6xl">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2 font-mono font-bold text-emerald-400">
+              <span className="text-xl">›_</span>
+              <span className="text-sm">MainStreet Shield</span>
+            </Link>
+            <Link href="/" className="text-xs font-mono text-[#888] hover:text-emerald-400 transition-colors">
+              ← Back to homepage
+            </Link>
+          </div>
+        </div>
+      </nav>
 
-      <form
-        className="max-w-md mx-auto bg-zinc-900/50 rounded-xl border border-zinc-800 p-6"
-        action="/api/auth/signup"
-      >
-        {referral && (
-          <div className="mb-4 p-3 rounded bg-emerald-900/20 border border-emerald-500/30">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-emerald-400">🎫</span>
-              <span className="text-xs text-emerald-400 font-medium">
-                Referred by {referral.referrerId}
-              </span>
+      <section className="mx-auto max-w-2xl px-4 py-20">
+        <div className="rounded-xl border border-[#1a1a1a] bg-[#111] p-8">
+          <h1 className="text-2xl font-mono font-bold mb-2">Apply for access</h1>
+          <p className="text-[#a1a1a1] text-sm mb-6">
+            MainStreet Shield is referral-only. Complete the application below
+            and we will review it. You will hear back by email.
+          </p>
+
+          <form
+            className="space-y-5"
+            action="/api/auth/signup"
+            method="POST"
+          >
+            <input type="hidden" name="referralCode" value={refQuery ?? ""} />
+
+            <div>
+              <label className="block text-xs font-mono text-[#888] mb-2">Email address</label>
+              <input
+                name="email"
+                type="email"
+                required
+                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500"
+                placeholder="you@company.com"
+              />
             </div>
-            <input
-              type="hidden"
-              name="referralCode"
-              value={referral.code}
-            />
-          </div>
-        )}
-        {!referral && referralCode && (
-          <div className="mb-4 p-3 rounded bg-rose-900/20 border border-rose-500/30">
-            <span className="text-xs text-rose-400">
-              Invalid or expired referral code.
-            </span>
-          </div>
-        )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Email
-            </label>
-            <input
-              name="email"
-              type="email"
-              required
-              className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Name (optional)
-            </label>
-            <input
-              name="name"
-              type="text"
-              className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
+            <div>
+              <label className="block text-xs font-mono text-[#888] mb-2">Name (optional)</label>
+              <input
+                name="name"
+                type="text"
+                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500"
+                placeholder="Your name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-[#888] mb-2">Why do you need MainStreet Shield?</label>
+              <textarea
+                name="why"
+                rows={5}
+                required
+                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500"
+                placeholder="Tell us about your business, what you want to secure, and why you need access to the lab..."
+              ></textarea>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full rounded bg-emerald-500 text-black font-mono font-bold py-3 hover:bg-emerald-400 transition-colors"
+            >
+              Submit application
+            </button>
+          </form>
         </div>
-        <div className="mb-4">
-          <label className="block text-xs text-zinc-400 mb-1">
-            Password
-          </label>
-          <input
-            name="password"
-            type="password"
-            required
-            minLength={8}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-          />
-        </div>
-        <button
-          type="submit"
-          className="w-full rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          Create Account
-        </button>
-        <p className="mt-4 text-center text-xs text-zinc-500">
-          Already have an account?{" "}
-          <a href="/login" className="text-emerald-400 hover:underline">
-            Sign in
-          </a>
-        </p>
-      </form>
+      </section>
     </div>
   );
+}
+
+import Link from "next/link";
+
+async function hasAccessGate(ref: string): Promise<boolean> {
+  try {
+    const referral = await db.referral.findUnique({
+      where: { code: ref },
+    });
+    return !!referral && referral.status === "pending";
+  } catch {
+    return false;
+  }
 }

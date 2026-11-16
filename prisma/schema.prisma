@@ -141,6 +141,25 @@ model WorkflowStep {
 }
 
 // ---------------------------------------------------------------------------
+// PendingSignup — signup requests awaiting admin approval
+// No account is created until an admin approves. User gets an email after
+// submitting, and admin gets a notification to review.
+// ---------------------------------------------------------------------------
+model PendingSignup {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  why       String   // why they need the app
+  status    String   @default("pending") // pending | approved | rejected
+  referralCode String? // referral code used at signup
+  adminNote String?  // admin's approval/rejection note
+  reviewedBy  String?  // admin userId who reviewed
+  reviewedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
 // Referrals — referral flow for signups
 // ---------------------------------------------------------------------------
 model Referral {

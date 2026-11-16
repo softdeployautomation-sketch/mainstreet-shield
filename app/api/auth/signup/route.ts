@@ -1,67 +1,67 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { createSession } from "@/lib/auth";
-import bcrypt from "bcrypt";
 import { z } from "zod";
 
 const signupSchema = z.object({
   email: z.string().email(),
   name: z.string().optional(),
-  password: z.string().min(8),
+  why: z.string().min(10, "Please tell us more about why you need access"),
   referralCode: z.string().optional(),
 });
 
-// POST /api/auth/signup
+// POST /api/auth/signup — creates a pending signup request (admin approval required)
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const data = signupSchema.parse(body);
 
-    // Check if user exists
-    const existing = await db.user.findUnique({
+    const existing = await db.pendingSignup.findUnique({
       where: { email: data.email },
     });
     if (existing) {
       return NextResponse.json(
-        { error: "Email already registered" },
+        { error: "An application is already pending for this email" },
         { status: 409 }
       );
     }
 
-    // Hash password
-    const passwordHash = await bcrypt.hash(data.password, 10);
-
-    // Create user
-    const user = await db.user.create({
-      data: {
-        email: data.email,
-        name: data.name ?? null,
-        password: passwordHash,
-        role: "user",
-      },
+    const existingUser = await db.user.findUnique({
+      where: { email: data.email },
     });
+    if (existingUser) {
+      return NextResponse.json(
+        { error: "An account already exists for this email" },
+        { status: 409 }
+      );
+    }
 
-    // Handle referral
     if (data.referralCode) {
       const referral = await db.referral.findUnique({
         where: { code: data.referralCode },
       });
-      if (referral && referral.status === "pending") {
-        await db.referral.update({
-          where: { id: referral.id },
-          data: { status: "claimed", referredId: user.id },
-        });
+      if (!referral || referral.status !== "pending") {
+        return NextResponse.json(
+          { error: "Invalid or expired referral code" },
+          { status: 400 }
+        );
       }
     }
 
-    // Create session
-    await createSession({
-      id: user.id,
-      email: user.email,
-      role: user.role,
+    const pending = await db.pendingSignup.create({
+      data: {
+        email: data.email,
+        name: data.name ?? null,
+        why: data.why,
+        status: "pending",
+        referralCode: data.referralCode ?? null,
+      },
     });
 
-    return NextResponse.json({ ok: true, userId: user.id });
+    return NextResponse.json({
+      ok: true,
+      pendingId: pending.id,
+      message: "Application submitted. We will review it and get back to you by email.",
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(
