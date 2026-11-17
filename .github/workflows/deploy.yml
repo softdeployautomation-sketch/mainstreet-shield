@@ -73,8 +73,8 @@ jobs:
             set -e
             mkdir -p /opt/mainstreet-shield
             cd /opt/mainstreet-shield
-            # Install dependencies on VPS
-            npm ci --production
+            # Install dependencies on VPS (include devDeps for tailwindcss build)
+            npm ci
             # Build Next.js app for production
             npx prisma generate
             npm run build
