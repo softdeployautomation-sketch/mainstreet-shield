@@ -1,8 +1,7 @@
-import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+"use client";
 
-import { getSession, requireAdmin } from "@/lib/auth";
-import { db } from "@/lib/db";
+import type { Metadata } from "next";
+import { useState, useEffect } from "react";
 
 export const metadata: Metadata = {
   title: "Referrals — MainStreet Shield Admin",
@@ -10,22 +9,45 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default async function ReferralsPage() {
-  const session = await getSession();
-  if (!session) redirect("/");
-  await requireAdmin(session).catch(() => redirect("/"));
-  const adminSession = session;
+interface Referral {
+  id: string;
+  code: string;
+  referrerId: string;
+  referredId: string | null;
+  status: string;
+  createdAt: string;
+  referrer: { id: string; email: string; name: string | null } | null;
+  referred: { id: string; email: string; name: string | null } | null;
+}
 
-  const referrals = await db.referral.findMany({
-    include: {
-      referrer: { select: { id: true, email: true, name: true } },
-      referred: { select: { id: true, email: true, name: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+export default function ReferralsPage() {
+  const [referrals, setReferrals] = useState<Referral[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/referrals")
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load referrals");
+        return r.json();
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setReferrals(data.referrals || []);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   async function generateCode() {
-    const email = prompt("Enter email for this referral code (or leave blank for admin):", adminSession.email);
+    const email = prompt("Enter email for this referral code (or leave blank for admin):", "");
     if (email === null) return;
     const res = await fetch("/api/admin/referrals", {
       method: "POST",
@@ -33,12 +55,55 @@ export default async function ReferralsPage() {
       body: JSON.stringify({ referrerEmail: email || undefined }),
     });
     if (!res.ok) {
-      alert("Failed to generate referral code");
+      const err = await res.json().catch(() => ({}));
+      alert("Failed to generate referral code: " + (err.error || "unknown error"));
       return;
     }
     const data = await res.json();
-    alert(`Referral code generated: ${data.referral.code}\nShare this link: ${typeof window !== "undefined" ? window.location.origin : ""}/signup?ref=${data.referral.code}`);
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    alert(`Referral code generated: ${data.referral.code}\nShare this link: ${origin}/signup?ref=${data.referral.code}`);
     window.location.reload();
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full gap-4 p-4 bg-zinc-950 text-zinc-100">
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-emerald-400 font-mono text-sm">›_</span>
+            <h1 className="text-xl font-semibold">Referral Management</h1>
+          </div>
+          <button
+            onClick={generateCode}
+            disabled={loading}
+            className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          >
+            + Generate Code
+          </button>
+        </div>
+        <p className="text-xs text-zinc-500 italic">Loading referrals...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col h-full gap-4 p-4 bg-zinc-950 text-zinc-100">
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-emerald-400 font-mono text-sm">›_</span>
+            <h1 className="text-xl font-semibold">Referral Management</h1>
+          </div>
+          <button
+            onClick={generateCode}
+            className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          >
+            + Generate Code
+          </button>
+        </div>
+        <p className="text-xs text-red-400 italic">{error}</p>
+      </div>
+    );
   }
 
   return (
@@ -71,11 +136,11 @@ export default async function ReferralsPage() {
             </tr>
           </thead>
           <tbody>
-            {referrals.map((r: any) => (
+            {referrals.map((r) => (
               <tr key={r.id} className="border-b border-zinc-800/50">
                 <td className="py-2 text-zinc-300 font-mono">{r.code}</td>
                 <td className="py-2 text-zinc-500">
-                  {r.referrer.email || r.referrerId}
+                  {r.referrer?.email || r.referrerId}
                 </td>
                 <td className="py-2 text-zinc-500">
                   {r.referred?.email || "—"}
