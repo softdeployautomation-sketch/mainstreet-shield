@@ -3,15 +3,48 @@ import { db } from "@/lib/db";
 import { getSession, requireAdmin } from "@/lib/auth";
 import crypto from "crypto";
 
+const SERVICE_TOKEN = process.env.MAINSTREET_SERVICE_TOKEN;
+
 // POST /api/admin/invites — admin creates a signup invite token
+// Accepts either a signed-in admin session (browser) or a service token (server-to-server from spaceworker)
 export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) {
+  const session = await getSession().catch(() => null);
+  let isServiceToken = false;
+
+  // Server-to-server auth from spaceworker admin
+  if (!session && SERVICE_TOKEN) {
+    const serviceToken = req.headers.get("x-service-token");
+    if (serviceToken === SERVICE_TOKEN) {
+      isServiceToken = true;
+    } else {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+  } else if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  } else {
+    await requireAdmin(session).catch(() =>
+      NextResponse.json({ error: "forbidden" }, { status: 403 })
+    );
   }
-  await requireAdmin(session).catch(() =>
-    NextResponse.json({ error: "forbidden" }, { status: 403 })
-  );
+
+  // Resolve creator userId — session admin or service-token fallback
+  let creatorUserId: string | undefined;
+  if (isServiceToken) {
+    const systemUser = await db.user.findFirst({
+      where: { role: "admin" },
+      select: { id: true },
+    });
+    creatorUserId = systemUser?.id;
+  } else {
+    creatorUserId = session!.userId;
+  }
+
+  if (!creatorUserId) {
+    return NextResponse.json(
+      { error: "no creator user available" },
+      { status: 500 }
+    );
+  }
 
   const { email, expiresInDays } = await req.json();
   const token = crypto.randomBytes(32).toString("hex");
@@ -24,7 +57,7 @@ export async function POST(req: Request) {
       token,
       email: email ?? null,
       expiresAt,
-      createdBy: session.userId,
+      creator: { connect: { id: creatorUserId } },
     },
   });
 
