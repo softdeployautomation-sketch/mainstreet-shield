@@ -40,10 +40,19 @@ export async function POST(req: Request) {
       });
     }
 
-    // Record pending signup for audit
-    await db.pendingSignup.create({
-      data: {
+    // Record pending signup for audit (idempotent by email)
+    await db.pendingSignup.upsert({
+      where: { email },
+      create: {
         email,
+        name: name ?? null,
+        why,
+        status: "approved",
+        referralCode: referralCode ?? null,
+        reviewedBy: user.id,
+        reviewedAt: new Date(),
+      },
+      update: {
         name: name ?? null,
         why,
         status: "approved",
