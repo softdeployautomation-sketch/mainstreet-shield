@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 
 export default async function AgentPage() {
   const session = await getSession();
-  if (!session) redirect("/");
+  if (!session) redirect("/login");
+  if (session.tier !== "3" && session.tier !== "5" && session.role !== "admin") redirect("/settings");
 
   const company = await db.company.findUnique({
     where: { userId: session.userId },

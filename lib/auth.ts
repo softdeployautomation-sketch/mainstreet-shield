@@ -12,6 +12,7 @@ export interface Session {
   userId: string;
   email: string;
   role: string;
+  tier: string;
 }
 
 export async function getSession(): Promise<Session | null> {
@@ -25,6 +26,7 @@ export async function getSession(): Promise<Session | null> {
       userId: payload.userId as string,
       email: payload.email as string,
       role: payload.role as string,
+      tier: payload.tier as string,
     };
   } catch {
     return null;
@@ -35,11 +37,13 @@ export async function createSession(user: {
   id: string;
   email: string;
   role: string;
+  tier: string;
 }): Promise<string> {
   const token = await new SignJWT({
     userId: user.id,
     email: user.email,
     role: user.role,
+    tier: user.tier,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()

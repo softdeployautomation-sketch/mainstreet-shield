@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CompanyPage() {
   const session = await getSession();
-  if (!session) redirect("/");
+  if (!session) redirect("/login");
 
   // Check if user already has a company
   const existing = await db.company.findUnique({

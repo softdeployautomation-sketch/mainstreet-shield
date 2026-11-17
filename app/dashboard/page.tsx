@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const session = await getSession();
-  if (!session) redirect("/");
+  if (!session) redirect("/login");
 
   const company = await db.company.findUnique({
     where: { userId: session.userId },

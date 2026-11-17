@@ -24,9 +24,10 @@ export async function POST(req: Request) {
       id: user.id,
       email: user.email,
       role: user.role,
+      tier: user.tier,
     });
 
-    return NextResponse.json({ ok: true, userId: user.id, role: user.role });
+    return NextResponse.json({ ok: true, userId: user.id, role: user.role, tier: user.tier });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(

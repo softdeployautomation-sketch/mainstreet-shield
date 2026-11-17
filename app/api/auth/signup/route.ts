@@ -1,77 +1,104 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { z } from "zod";
+import { createSession } from "@/lib/auth";
 
-const signupSchema = z.object({
-  email: z.string().email(),
-  name: z.string().optional(),
-  why: z.string().min(10, "Please tell us more about why you need access"),
-  referralCode: z.string().optional(),
-});
+const SESSION_SECRET = new TextEncoder().encode(
+  process.env.SESSION_SECRET || "dev-secret-change-me"
+);
 
-// POST /api/auth/signup — creates a pending signup request (admin approval required)
+// POST /api/auth/signup — create user with tier 1 automatically (no admin approval needed)
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const data = signupSchema.parse(body);
+    const { email, name, why, referralCode } = body;
 
-    const existing = await db.pendingSignup.findUnique({
-      where: { email: data.email },
-    });
-    if (existing) {
-      return NextResponse.json(
-        { error: "An application is already pending for this email" },
-        { status: 409 }
-      );
+    if (!email || !why) {
+      return NextResponse.json({ error: "email and why are required" }, { status: 400 });
     }
 
-    const existingUser = await db.user.findUnique({
-      where: { email: data.email },
-    });
+    const existingUser = await db.user.findUnique({ where: { email } });
     if (existingUser) {
-      return NextResponse.json(
-        { error: "An account already exists for this email" },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "An account already exists for this email" }, { status: 409 });
     }
 
-    if (data.referralCode) {
-      const referral = await db.referral.findUnique({
-        where: { code: data.referralCode },
-      });
-      if (!referral || referral.status !== "pending") {
-        return NextResponse.json(
-          { error: "Invalid or expired referral code" },
-          { status: 400 }
-        );
-      }
-    }
-
-    const pending = await db.pendingSignup.create({
+    // Create user with tier 1 automatically
+    const user = await db.user.create({
       data: {
-        email: data.email,
-        name: data.name ?? null,
-        why: data.why,
-        status: "pending",
-        referralCode: data.referralCode ?? null,
+        email,
+        name: name ?? null,
+        role: "user",
+        tier: "1", // Tier 1 = limited access (explore tools, no VM creation, no agents)
       },
     });
 
-    return NextResponse.json({
-      ok: true,
-      pendingId: pending.id,
-      message: "Application submitted. We will review it and get back to you by email.",
-    });
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: err.errors[0]?.message || "invalid input" },
-        { status: 400 }
-      );
+    // Mark referral as claimed if there's a referral code
+    if (referralCode) {
+      await db.referral.updateMany({
+        where: { code: referralCode, status: "pending" },
+        data: { status: "claimed", referredId: user.id },
+      });
     }
-    return NextResponse.json(
-      { error: "signup failed" },
-      { status: 500 }
-    );
+
+    // Record pending signup for audit
+    await db.pendingSignup.create({
+      data: {
+        email,
+        name: name ?? null,
+        why,
+        status: "approved",
+        referralCode: referralCode ?? null,
+        reviewedBy: user.id,
+        reviewedAt: new Date(),
+      },
+    });
+
+    // Auto-create session after signup
+    const token = await createSession({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      tier: user.tier,
+    });
+
+    const response = NextResponse.json({
+      ok: true,
+      userId: user.id,
+      tier: user.tier,
+      message: "Account created. You have Tier 1 access — explore the lab tools.",
+    });
+
+    response.cookies.set("shield-session", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    });
+
+    return response;
+  } catch (err) {
+    console.error("Signup error:", err);
+    return NextResponse.json({ error: "signup failed" }, { status: 500 });
+  }
+}
+
+// GET /api/auth/signup — get current user tier
+export async function GET() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("shield-session")?.value;
+  if (!token) {
+    return NextResponse.json({ error: "not authenticated" }, { status: 401 });
+  }
+  try {
+    const { jwtVerify } = await import("jose");
+    const { payload } = await jwtVerify(token, SESSION_SECRET);
+    return NextResponse.json({
+      userId: payload.userId as string,
+      email: payload.email as string,
+      tier: payload.tier as string,
+      role: payload.role as string,
+    });
+  } catch {
+    return NextResponse.json({ error: "invalid session" }, { status: 401 });
   }
 }

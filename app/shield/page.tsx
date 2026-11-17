@@ -13,15 +13,16 @@ export const dynamic = "force-dynamic";
 
 export default async function ShieldPage() {
   const session = await getSession();
-  if (!session) redirect("/signup");
+  if (!session) redirect("/login");
+  if (session.tier !== "5" && session.role !== "admin") redirect("/settings");
 
   return (
-    <div className="flex flex-col h-full gap-4 p-4 bg-zinc-950 text-zinc-100">
+    <div className="flex flex-col h-full gap-4 p-4 bg-bg text-fg">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-emerald-400 font-mono text-sm">›_</span>
+        <span className="text-brand-600 font-mono text-sm dark:text-brand-400">›_</span>
         <h1 className="text-xl font-semibold">MainStreet Shield</h1>
-        <span className="ml-auto text-xs text-zinc-500">
-          {session.email} · {session.role}
+        <span className="ml-auto text-xs text-fg-muted">
+          {session.email} · Tier {session.tier}
         </span>
       </div>
       <ShieldVmPanel userId={session.userId} isAdmin={session.role === "admin"} />
