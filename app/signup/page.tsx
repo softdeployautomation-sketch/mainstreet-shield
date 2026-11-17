@@ -28,12 +28,11 @@ export default async function SignupPage({
 
   let hasAccess = refCookie ? await hasAccessGate(refCookie) : false;
 
-  if (!hasAccess && refQuery) {
-    hasAccess = await hasAccessGate(refQuery);
-    if (!hasAccess) redirect("/?error=referral_required");
-  }
+  const referralError = !hasAccess ? "A valid referral link is required to apply." : null;
 
-  if (!hasAccess) redirect("/?error=referral_required");
+  if (refQuery && !hasAccess) {
+    hasAccess = await hasAccessGate(refQuery);
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-[#e5e5e5] flex flex-col">
@@ -58,6 +57,12 @@ export default async function SignupPage({
             MainStreet Shield is referral-only. Complete the application below
             and we will review it. You will hear back by email.
           </p>
+
+          {referralError && (
+            <div className="mb-6 p-3 rounded bg-[#1a1a1a]/50 border border-red-500/30 text-red-400 text-xs font-mono">
+              {referralError}
+            </div>
+          )}
 
           <form
             className="space-y-5"
