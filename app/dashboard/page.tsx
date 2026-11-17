@@ -60,7 +60,7 @@ export default async function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {company.assets.map((a) => (
+                  {company.assets.map((a: any) => (
                     <tr key={a.id} className="border-b border-zinc-800/50">
                       <td className="py-2 text-zinc-300">{a.name}</td>
                       <td className="py-2 text-zinc-500">{a.type}</td>
