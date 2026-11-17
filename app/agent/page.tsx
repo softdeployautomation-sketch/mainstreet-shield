@@ -71,7 +71,7 @@ export default async function AgentPage() {
         <div className="lg:col-span-1 bg-zinc-900/50 rounded-xl border border-zinc-800 p-6">
           <h2 className="text-sm font-semibold text-zinc-300 mb-4">Targets</h2>
           <div className="space-y-2">
-            {company?.assets?.map((a) => (
+            {company?.assets?.map((a: any) => (
               <div key={a.id} className="flex items-center justify-between p-2 rounded border border-zinc-800 bg-zinc-900/30">
                 <div>
                   <div className="text-sm text-zinc-200">{a.name}</div>
