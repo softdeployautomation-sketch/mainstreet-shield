@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ShieldPage() {
   const session = await getSession();
-  if (!session) redirect("/");
+  if (!session) redirect("/signup");
 
   return (
     <div className="flex flex-col h-full gap-4 p-4 bg-zinc-950 text-zinc-100">
