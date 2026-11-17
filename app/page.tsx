@@ -63,12 +63,6 @@ export default function HomePage() {
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <Link
             href="/signup"
-            className="flex-1 sm:flex-none px-8 py-4 bg-brand-600 text-white font-mono font-bold rounded hover:bg-brand-700 transition-colors text-center"
-          >
-            Request Access
-          </Link>
-          <Link
-            href="/signup"
             className="flex-1 sm:flex-none px-8 py-4 rounded border border-border bg-bg-elevated text-fg font-mono hover:bg-brand-50 transition-colors text-center"
           >
             Request Access
@@ -85,7 +79,7 @@ export default function HomePage() {
             },
             {
               title: "2. Get your lab",
-              desc: "Approved users get a real Linux desktop VM (4 GB RAM, 2 vCPU, 60 GB disk) with GUI — start and stop it from your dashboard.",
+              desc: "Approved users receive a private lab console — a secured environment where you define what to test, run workflows, and operate the Cline agent — all under your approval.",
             },
             {
               title: "3. Run workflows",
@@ -122,7 +116,7 @@ export default function HomePage() {
         <h2 className="text-3xl font-display font-bold mb-12 text-left">Agent tab — bug hunting</h2>
         <div className="rounded-xl border border-border bg-bg-elevated p-6">
           <p className="text-fg-muted text-sm mb-6">
-            The Cline agent works inside your Linux desktop over SSH and VNC.
+            The Cline agent works inside your lab console over SSH and VNC.
             Assist mode (you approve each action) or full-control autonomous
             bug hunting — you hold the kill switch.
           </p>
@@ -153,7 +147,7 @@ export default function HomePage() {
             <span>MainStreet Shield</span>
           </div>
           <p className="text-xs text-fg-muted">
-            © {new Date().getFullYear()} MainStreet Shield. Real Linux lab,
+            © {new Date().getFullYear()} MainStreet Shield. Private lab console,
             real security workflows.
           </p>
         </div>

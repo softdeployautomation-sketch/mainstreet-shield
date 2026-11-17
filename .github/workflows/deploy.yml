@@ -75,11 +75,14 @@ jobs:
             cd /opt/mainstreet-shield
             # Install dependencies on VPS
             npm ci --production
-            # Restart the app (systemd or pm2)
-            if systemctl list-unit-files | grep -q mainstreet-shield-app; then
-              systemctl restart mainstreet-shield-app
+            # Build Next.js app for production
+            npx prisma generate
+            npm run build
+            # Restart the app (systemd)
+            if systemctl list-unit-files | grep -q mainstreet-shield.service; then
+              systemctl restart mainstreet-shield.service
             else
-              echo "No systemd service for mainstreet-shield-app — app will be started manually"
+              echo "No systemd service for mainstreet-shield.service — app will be started manually"
             fi
           '
         env:
