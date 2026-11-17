@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { getSession, requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
-import type { Referral } from "@prisma/client";
+
 
 export const metadata: Metadata = {
   title: "Referrals — MainStreet Shield Admin",
@@ -54,7 +54,7 @@ export default async function ReferralsPage() {
             </tr>
           </thead>
           <tbody>
-            {referrals.map((r: Referral) => (
+            {referrals.map((r: any) => (
               <tr key={r.id} className="border-b border-zinc-800/50">
                 <td className="py-2 text-zinc-300 font-mono">{r.code}</td>
                 <td className="py-2 text-zinc-500">
