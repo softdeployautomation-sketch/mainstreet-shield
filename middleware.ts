@@ -39,8 +39,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected routes requiring referral gate.
-  // /login is email-only sign-in — no referral cookie needed.
-  const referralGatedPaths = ["/signup", "/shield", "/dashboard", "/agent", "/company"];
+  // /login is email-only sign-in — also requires referral cookie.
+  const referralGatedPaths = ["/login", "/signup", "/shield", "/dashboard", "/agent", "/company"];
   const isReferralGated = referralGatedPaths.some((p) => path === p || path.startsWith(p + "/"));
 
   if (isShieldDomain && isReferralGated) {
