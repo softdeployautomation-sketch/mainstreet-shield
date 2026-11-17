@@ -84,7 +84,7 @@ export default async function DashboardPage() {
               Workflows ({company.workflows.length})
             </h2>
             <div className="space-y-3">
-              {company.workflows.map((w) => (
+              {company.workflows.map((w: any) => (
                 <div key={w.id} className="p-3 rounded border border-zinc-800 bg-zinc-900/30">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium text-zinc-200">{w.name}</span>
@@ -104,7 +104,7 @@ export default async function DashboardPage() {
                     {w.description || "No description"}
                   </p>
                   <div className="flex gap-2">
-                    {w.steps.map((s) => (
+                    {w.steps.map((s: any) => (
                       <span
                         key={s.id}
                         className={`px-2 py-1 rounded text-xs border ${
