@@ -24,7 +24,7 @@ export async function middleware(request: NextRequest) {
     const code = path.slice(3); // strip "/r/"
     // Validate against the referral API.
     const res = await fetch(
-      `${request.nextUrl.origin}/api/admin/referrals/validate`,
+      "http://localhost:3000/api/admin/referrals/validate",
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) },
     );
     if (res.ok) {
@@ -50,7 +50,7 @@ export async function middleware(request: NextRequest) {
         let valid = false;
         try {
           const res = await fetch(
-            `${request.nextUrl.origin}/api/admin/referrals/validate`,
+            "http://localhost:3000/api/admin/referrals/validate",
             { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: ref }) },
           );
           if (res.ok) {
