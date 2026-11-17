@@ -100,7 +100,7 @@ export default async function AgentPage() {
         <div className="lg:col-span-1 bg-zinc-900/50 rounded-xl border border-zinc-800 p-6">
           <h2 className="text-sm font-semibold text-zinc-300 mb-4">Lab VM</h2>
           <div className="space-y-2">
-            {vms.map((vm) => (
+            {vms.map((vm: any) => (
               <div key={vm.id} className="p-3 rounded border border-zinc-800 bg-zinc-900/30">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm text-zinc-200">{vm.label}</span>
