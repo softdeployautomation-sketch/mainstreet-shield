@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
-  title: "Request Access — MainStreet Shield",
+  title: "Apply for Access — MainStreet Shield",
 };
 
 export const dynamic = "force-dynamic";
@@ -50,62 +51,65 @@ export default async function SignupPage({
         </div>
       </nav>
 
-      <section className="mx-auto max-w-2xl px-4 py-20">
-        <div className="rounded-xl border border-[#1a1a1a] bg-[#111] p-8">
-          <h1 className="text-2xl font-mono font-bold mb-2">Apply for access</h1>
-          <p className="text-[#a1a1a1] text-sm mb-6">
+      <section className="flex-1 mx-auto max-w-3xl px-4 py-12 flex items-center justify-center">
+        <div className="w-full rounded-xl border border-[#1a1a1a] bg-[#111] p-8 md:p-12">
+          <div className="flex items-center gap-2 mb-6">
+            <span className="text-emerald-400 font-mono text-xs">›_</span>
+            <h1 className="text-3xl font-mono font-bold tracking-tight">Apply for access</h1>
+          </div>
+          <p className="text-[#a1a1a1] text-sm md:text-base mb-8 leading-relaxed">
             MainStreet Shield is referral-only. Complete the application below
             and we will review it. You will hear back by email.
           </p>
 
           {referralError && (
-            <div className="mb-6 p-3 rounded bg-[#1a1a1a]/50 border border-red-500/30 text-red-400 text-xs font-mono">
+            <div className="mb-8 p-4 rounded bg-[#1a1a1a]/50 border border-red-500/30 text-red-400 text-xs font-mono">
               {referralError}
             </div>
           )}
 
           <form
-            className="space-y-5"
+            className="space-y-6"
             action="/api/auth/signup"
             method="POST"
           >
             <input type="hidden" name="referralCode" value={refQuery ?? ""} />
 
-            <div>
-              <label className="block text-xs font-mono text-[#888] mb-2">Email address</label>
+            <div className="space-y-2">
+              <label className="block text-xs font-mono text-[#888]">Email address</label>
               <input
                 name="email"
                 type="email"
                 required
-                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500"
+                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3.5 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500 transition-colors"
                 placeholder="you@company.com"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-mono text-[#888] mb-2">Name (optional)</label>
+            <div className="space-y-2">
+              <label className="block text-xs font-mono text-[#888]">Name (optional)</label>
               <input
                 name="name"
                 type="text"
-                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500"
+                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3.5 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500 transition-colors"
                 placeholder="Your name"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-mono text-[#888] mb-2">Why do you need MainStreet Shield?</label>
+            <div className="space-y-2">
+              <label className="block text-xs font-mono text-[#888]">Why do you need MainStreet Shield?</label>
               <textarea
                 name="why"
-                rows={5}
+                rows={6}
                 required
-                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500"
+                className="w-full rounded border border-[#1a1a1a] bg-[#0a0a0a] px-4 py-3.5 text-sm text-[#e5e5e5] focus:ring-2 focus:ring-emerald-500 transition-colors"
                 placeholder="Tell us about your business, what you want to secure, and why you need access to the lab..."
               ></textarea>
             </div>
 
             <button
               type="submit"
-              className="w-full rounded bg-emerald-500 text-black font-mono font-bold py-3 hover:bg-emerald-400 transition-colors"
+              className="w-full rounded bg-emerald-500 text-black font-mono font-bold py-4 hover:bg-emerald-400 transition-colors"
             >
               Submit application
             </button>
@@ -115,8 +119,6 @@ export default async function SignupPage({
     </div>
   );
 }
-
-import Link from "next/link";
 
 async function hasAccessGate(ref: string): Promise<boolean> {
   try {

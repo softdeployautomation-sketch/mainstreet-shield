@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { getSession, requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-
 export const metadata: Metadata = {
   title: "Referrals — MainStreet Shield Admin",
 };
@@ -15,6 +14,7 @@ export default async function ReferralsPage() {
   const session = await getSession();
   if (!session) redirect("/");
   await requireAdmin(session).catch(() => redirect("/"));
+  const adminSession = session;
 
   const referrals = await db.referral.findMany({
     include: {
@@ -23,6 +23,23 @@ export default async function ReferralsPage() {
     },
     orderBy: { createdAt: "desc" },
   });
+
+  async function generateCode() {
+    const email = prompt("Enter email for this referral code (or leave blank for admin):", adminSession.email);
+    if (email === null) return;
+    const res = await fetch("/api/admin/referrals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ referrerEmail: email || undefined }),
+    });
+    if (!res.ok) {
+      alert("Failed to generate referral code");
+      return;
+    }
+    const data = await res.json();
+    alert(`Referral code generated: ${data.referral.code}\nShare this link: ${typeof window !== "undefined" ? window.location.origin : ""}/signup?ref=${data.referral.code}`);
+    window.location.reload();
+  }
 
   return (
     <div className="flex flex-col h-full gap-4 p-4 bg-zinc-950 text-zinc-100">
@@ -35,7 +52,7 @@ export default async function ReferralsPage() {
           </p>
         </div>
         <button
-          onClick={() => {}}
+          onClick={generateCode}
           className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
         >
           + Generate Code
@@ -72,12 +89,23 @@ export default async function ReferralsPage() {
             {referrals.length === 0 && (
               <tr>
                 <td colSpan={5} className="py-4 text-center text-zinc-500 italic">
-                  No referrals yet.
+                  No referrals yet. Click "+ Generate Code" to create one.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-6 p-4 rounded border border-[#1a1a1a] bg-[#111]">
+        <h2 className="text-xs font-mono text-zinc-400 mb-3">How it works</h2>
+        <ol className="text-xs text-zinc-500 space-y-2 list-disc list-inside">
+          <li>Generate a referral code above</li>
+          <li>Share the signup link: <span className="font-mono text-emerald-400">/signup?ref=CODE</span></li>
+          <li>User submits the "Apply for access" form</li>
+          <li>Admin reviews and approves the pending signup</li>
+          <li>User receives a login link by email</li>
+        </ol>
       </div>
     </div>
   );

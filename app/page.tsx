@@ -58,8 +58,8 @@ export default function HomePage() {
           <Link href="/signup" className="flex-1 sm:flex-none px-8 py-4 bg-emerald-500 text-black font-mono font-bold rounded hover:bg-emerald-400 transition-colors text-center">
             Request Access
           </Link>
-          <Link href="/shield" className="flex-1 sm:flex-none px-8 py-4 rounded border border-[#1a1a1a] bg-[#111] text-[#e5e5e5] font-mono hover:border-emerald-500 transition-colors text-center">
-            Enter Lab
+          <Link href="/signup" className="flex-1 sm:flex-none px-8 py-4 rounded border border-[#1a1a1a] bg-[#111] text-[#e5e5e5] font-mono hover:border-emerald-500 transition-colors text-center">
+            Request Access
           </Link>
         </div>
       </section>
