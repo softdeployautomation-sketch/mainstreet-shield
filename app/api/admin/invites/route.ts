@@ -52,12 +52,23 @@ export async function POST(req: Request) {
     Date.now() + (expiresInDays ?? 7) * 24 * 60 * 60 * 1000
   );
 
+  // Create a SignupInvite (for email-based invite tracking)
   const invite = await db.signupInvite.create({
     data: {
       token,
       email: email ?? null,
       expiresAt,
       creator: { connect: { id: creatorUserId } },
+    },
+  });
+
+  // Also create a Referral record so the referral-link middleware can validate it.
+  // The referral code IS the signup token — same value, dual purpose.
+  await db.referral.create({
+    data: {
+      code: token,
+      status: "pending",
+      referrerId: creatorUserId,
     },
   });
 
