@@ -16,13 +16,13 @@ export default async function SettingsPage() {
 
   if (!user) redirect("/login");
 
-  const tierLabels = {
+  const tierLabels: Record<string, string> = {
     "1": "Tier 1 - Explorer",
     "3": "Tier 3 - Researcher",
     "5": "Tier 5 - Full Access",
   };
 
-  const tierDescriptions = {
+  const tierDescriptions: Record<string, string> = {
     "1": "Limited access - explore lab tools, view assets and workflows. Cannot create VMs or run agents.",
     "3": "Researcher access - can run Cline agent sessions and view all lab tools.",
     "5": "Full access - can create VMs, run agents, manage company assets and workflows.",
@@ -101,7 +101,7 @@ export default async function SettingsPage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-fg-muted">Referred by</dt>
-                  <dd className="font-mono">{referral.referrer?.email}</dd>
+                  <dd className="font-mono">{referral.referrerId || referral?.referrerId || ""}</dd>
                 </div>
               </>
             )}

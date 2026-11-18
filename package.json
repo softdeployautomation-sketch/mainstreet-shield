@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@cline/sdk": "^0.2.0",
-    "@prisma/client": "^6",
+    "@prisma/client": "^6.19.3",
     "bcrypt": "^6",
     "jose": "^6",
     "lucide-react": "^1.39.0",
