@@ -7,10 +7,8 @@ const SESSION_SECRET = new TextEncoder().encode(
   process.env.SESSION_SECRET || "dev-secret-change-me"
 );
 
-// POST /api/auth/signup — create user with tier 1 automatically (no admin approval needed)
 export async function POST(req: Request) {
   try {
-    // Accept both JSON (fetch API) and form-encoded (HTML form POST)
     let email: string | null = null;
     let name: string | null = null;
     let why: string | null = null;
@@ -27,11 +25,9 @@ export async function POST(req: Request) {
       const formData = await req.formData();
       email = (formData.get("email") ?? "").toString() || null;
       name = (formData.get("name") ?? "").toString() || null;
-      why = (formData.get("why") ?? "").toString() || null;
       referralCode = (formData.get("referralCode") ?? "").toString() || null;
     }
 
-    // Fallback to sw_ref cookie (SpaceWorker pattern: body → query → cookie)
     if (!referralCode) {
       const cookieStore = await cookies();
       referralCode = cookieStore.get("sw_ref")?.value ?? null;
@@ -46,25 +42,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "An account already exists for this email" }, { status: 409 });
     }
 
-    // Create user with tier 1 automatically
     const user = await db.user.create({
       data: {
         email,
         name: name ?? null,
         role: "user",
-        tier: "1", // Tier 1 = limited access (explore tools, no VM creation, no agents)
+        tier: "1",
       },
     });
 
-    // Mark referral as claimed if there's a referral code
+    let referralUpdated = false;
     if (referralCode) {
-      await db.referral.updateMany({
+      const result = await db.referral.updateMany({
         where: { code: referralCode, status: "pending" },
         data: { status: "claimed", referredId: user.id },
       });
+      referralUpdated = result.count > 0;
     }
 
-    // Record pending signup for audit (idempotent by email)
+    if (referralCode && !referralUpdated) {
+      return NextResponse.json(
+        { error: "Invalid or already used referral code" },
+        { status: 400 }
+      );
+    }
+
     await db.pendingSignup.upsert({
       where: { email },
       create: {
@@ -86,7 +88,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // Auto-create session after signup
     const token = await createSession({
       id: user.id,
       email: user.email,
@@ -94,29 +95,18 @@ export async function POST(req: Request) {
       tier: user.tier,
     });
 
-    const response = NextResponse.json({
-      ok: true,
-      userId: user.id,
-      tier: user.tier,
-      message: "Account created. You have Tier 1 access — explore the lab tools.",
+    const redirectTo = referralCode
+      ? "/settings?ref=" + encodeURIComponent(referralCode)
+      : "/settings";
+    return NextResponse.redirect(new URL(redirectTo, req.url), {
+      status: 303,
     });
-
-    response.cookies.set("shield-session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 7,
-      path: "/",
-    });
-
-    return response;
   } catch (err) {
     console.error("Signup error:", err);
     return NextResponse.json({ error: "signup failed" }, { status: 500 });
   }
 }
 
-// GET /api/auth/signup — get current user tier
 export async function GET() {
   const cookieStore = await cookies();
   const token = cookieStore.get("shield-session")?.value;

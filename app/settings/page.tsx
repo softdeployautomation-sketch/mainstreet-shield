@@ -16,17 +16,27 @@ export default async function SettingsPage() {
 
   if (!user) redirect("/login");
 
-  const tierLabels: Record<string, string> = {
-    "1": "Tier 1 — Explorer",
-    "3": "Tier 3 — Researcher",
-    "5": "Tier 5 — Full Access",
+  const tierLabels = {
+    "1": "Tier 1 - Explorer",
+    "3": "Tier 3 - Researcher",
+    "5": "Tier 5 - Full Access",
   };
 
-  const tierDescriptions: Record<string, string> = {
-    "1": "Limited access — explore lab tools, view assets and workflows. Cannot create VMs or run agents.",
-    "3": "Researcher access — can run Cline agent sessions and view all lab tools.",
-    "5": "Full access — can create VMs, run agents, manage company assets and workflows.",
+  const tierDescriptions = {
+    "1": "Limited access - explore lab tools, view assets and workflows. Cannot create VMs or run agents.",
+    "3": "Researcher access - can run Cline agent sessions and view all lab tools.",
+    "5": "Full access - can create VMs, run agents, manage company assets and workflows.",
   };
+
+  const referral = await db.referral.findFirst({
+    where: {
+      OR: [
+        { referrerId: session.userId },
+        { referredId: session.userId },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
   return (
     <div className="min-h-screen bg-bg text-fg flex flex-col">
@@ -34,7 +44,7 @@ export default async function SettingsPage() {
         <div className="mx-auto max-w-6xl">
           <div className="flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-              <span className="text-xl">›_</span>
+              <span className="text-xl">&#8594;_</span>
               <span className="text-sm">MainStreet Shield</span>
             </Link>
             <div className="flex items-center gap-4">
@@ -50,7 +60,7 @@ export default async function SettingsPage() {
 
       <section className="flex-1 mx-auto max-w-2xl px-4 py-12">
         <div className="mb-8">
-          <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400 transition-colors">← Back to dashboard</Link>
+          <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400 transition-colors">&#8592; Back to dashboard</Link>
           <h1 className="text-3xl font-display font-bold tracking-tight mt-2">Settings</h1>
         </div>
 
@@ -82,6 +92,33 @@ export default async function SettingsPage() {
             <div className="flex justify-between">
               <dt className="text-fg-muted">Member since</dt>
               <dd className="font-mono text-xs">{new Date(user.createdAt).toLocaleDateString()}</dd>
+            </div>
+            {referral && (
+              <>
+                <div className="flex justify-between">
+                  <dt className="text-fg-muted">Referral code</dt>
+                  <dd className="font-mono">{referral.code}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-fg-muted">Referred by</dt>
+                  <dd className="font-mono">{referral.referrer?.email}</dd>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between">
+              <dt className="text-fg-muted">Copy referral link</dt>
+              <dd className="font-mono text-xs text-emerald-400">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const link = `${window.location.origin}/signup?ref=${referral?.code || ""}`;
+                    navigator.clipboard.writeText(link);
+                  }}
+                  className="hover:underline cursor-pointer"
+                >
+                  {referral?.code || "No referral yet"}
+                </button>
+              </dd>
             </div>
           </dl>
         </div>
