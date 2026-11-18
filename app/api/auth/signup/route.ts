@@ -10,8 +10,32 @@ const SESSION_SECRET = new TextEncoder().encode(
 // POST /api/auth/signup — create user with tier 1 automatically (no admin approval needed)
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { email, name, why, referralCode } = body;
+    // Accept both JSON (fetch API) and form-encoded (HTML form POST)
+    let email: string | null = null;
+    let name: string | null = null;
+    let why: string | null = null;
+    let referralCode: string | null = null;
+
+    const contentType = req.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const body = await req.json();
+      email = body.email ?? null;
+      name = body.name ?? null;
+      why = body.why ?? null;
+      referralCode = body.referralCode ?? null;
+    } else {
+      const formData = await req.formData();
+      email = (formData.get("email") ?? "").toString() || null;
+      name = (formData.get("name") ?? "").toString() || null;
+      why = (formData.get("why") ?? "").toString() || null;
+      referralCode = (formData.get("referralCode") ?? "").toString() || null;
+    }
+
+    // Fallback to sw_ref cookie (SpaceWorker pattern: body → query → cookie)
+    if (!referralCode) {
+      const cookieStore = await cookies();
+      referralCode = cookieStore.get("sw_ref")?.value ?? null;
+    }
 
     if (!email || !why) {
       return NextResponse.json({ error: "email and why are required" }, { status: 400 });
