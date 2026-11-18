@@ -98,6 +98,8 @@ export default function ClientReferralsPage() {
         <p className="text-xs text-red-400 italic">{error}</p>
       </div>
     );
+  }
+
   return (
     <div className="flex flex-col h-full gap-4 p-4 bg-zinc-950 text-zinc-100">
       <div className="flex items-center justify-between">
@@ -135,7 +137,7 @@ export default function ClientReferralsPage() {
                   {r.referrer?.email || r.referrerId}
                 </td>
                 <td className="py-2 text-zinc-500">
-                  {r.referred?.email || "—"}
+                  {r.referred?.email || r.referredId || "—"}
                 </td>
                 <td className="py-2 text-zinc-500">{r.status}</td>
                 <td className="py-2 text-zinc-500 text-xs">
@@ -160,11 +162,11 @@ export default function ClientReferralsPage() {
           <li>Generate a referral code above</li>
           <li>Share the signup link: <span className="font-mono text-emerald-400">/signup?ref=CODE</span></li>
           <li>User submits the "Apply for access" form</li>
-          <li>Admin reviews and approves the pending signup</li>
-          <li>User receives a login link by email</li>
+          <li>Referral shows as "claimed" and user gets Tier 1 immediately</li>
+          <li>User sees referral code in Settings (top right)</li>
+          <li>User can copy referral link from Settings and share it</li>
         </ol>
       </div>
     </div>
   );
 }
-  }
