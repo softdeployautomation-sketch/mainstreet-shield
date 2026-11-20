@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getUserReferralLink } from "@/lib/referral";
 import CopyButton from "@/components/CopyButton";
+import { DeleteAccountForm } from "@/components/delete-account-form";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,10 @@ export default async function SettingsPage() {
               </dd>
             </div>
           </dl>
+        </div>
+
+        <div className="mt-8 rounded-xl border border-border bg-bg-elevated p-6">
+          <DeleteAccountForm userId={user.id} />
         </div>
       </section>
     </div>

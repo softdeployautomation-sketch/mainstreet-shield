@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, requireAdmin } from "@/lib/auth";
+import { getSession, requireAdmin, type Session } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 // GET /api/admin/users — list all users (admin only)
@@ -98,4 +98,37 @@ export async function PATCH(req: Request) {
   });
 
   return NextResponse.json({ ok: true, user });
+}
+
+// DELETE /api/admin/users — delete a user (admin can delete any; user can delete self)
+export async function DELETE(req: Request) {
+  const serviceToken = req.headers.get("X-Service-Token");
+  let session: Session | null = null;
+  if (
+    serviceToken &&
+    serviceToken === process.env.MAINSTREET_SERVICE_TOKEN
+  ) {
+    // bypass session check — trusted SpaceWorker admin proxy
+  } else {
+    session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+  }
+
+  const { userId } = await req.json();
+  if (!userId) {
+    return NextResponse.json({ error: "userId is required" }, { status: 400 });
+  }
+
+  // Users can delete their own account; admins (or service token) can delete any account
+  if (session && session.userId !== userId && session.role !== "admin") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  await db.user.delete({
+    where: { id: userId },
+  });
+
+  return NextResponse.json({ ok: true });
 }

@@ -17,6 +17,7 @@ export function SignupForm({ refCode }: { refCode?: string }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [why, setWhy] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -32,6 +33,7 @@ export function SignupForm({ refCode }: { refCode?: string }) {
           email,
           name,
           why,
+          password,
           ...(refCode ? { referralCode: refCode } : {}),
         }),
       });
@@ -89,6 +91,21 @@ export function SignupForm({ refCode }: { refCode?: string }) {
           onChange={(e) => setWhy(e.target.value)}
           placeholder="Tell us about your business, what you want to secure, and why you need access to the lab..."
         ></textarea>
+      </div>
+      <div className="space-y-2">
+        <label className="block text-xs font-mono text-fg-muted">
+          Password (min 12 characters)
+        </label>
+        <input
+          name="password"
+          type="password"
+          required
+          minLength={12}
+          className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••••••"
+        />
       </div>
       <button
         type="submit"

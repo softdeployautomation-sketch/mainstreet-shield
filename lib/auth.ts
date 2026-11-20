@@ -1,7 +1,9 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
+import bcrypt from "bcrypt";
 import { db } from "./db";
 
 const SESSION_SECRET = new TextEncoder().encode(
@@ -65,6 +67,38 @@ export async function createSession(user: {
 export async function deleteSession() {
   const cookieStore = await cookies();
   cookieStore.delete("shield-session");
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 12);
+}
+
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+
+/**
+ * Require that the authenticated user has a password set.
+ * Returns the user record or throws an appropriate NextResponse error.
+ */
+export async function requirePasswordUser(session: Session) {
+  const user = await db.user.findUnique({
+    where: { id: session.userId },
+    select: { id: true, email: true, password: true, role: true, tier: true },
+  });
+  if (!user) {
+    throw new NextResponse(
+      JSON.stringify({ error: "user not found" }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  if (!user.password) {
+    throw new NextResponse(
+      JSON.stringify({ error: "password not set — please create one in Settings" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  return user;
 }
 
 export async function requireAdmin(session: Session | null) {

@@ -55,8 +55,7 @@ export default async function LoginPage({
             <h1 className="text-3xl font-display font-bold tracking-tight">Sign in</h1>
           </div>
           <p className="text-fg-muted text-sm md:text-base mb-8 leading-relaxed">
-            Enter your email to sign in. No password required — sign-in is via
-            referral link only.
+            Enter your email and password to sign in.
           </p>
           <LoginForm refCode={refQuery ?? undefined} />
 

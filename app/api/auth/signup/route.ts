@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import { createSession } from "@/lib/auth";
+import { createSession, hashPassword } from "@/lib/auth";
 import {
   validateReferral,
   attributeReferral,
@@ -19,6 +19,7 @@ export async function POST(req: Request) {
     let email: string | null = null;
     let name: string | null = null;
     let why: string | null = null;
+    let password: string | null = null;
     let referralCode: string | null = null;
 
     const contentType = req.headers.get("content-type") ?? "";
@@ -27,11 +28,13 @@ export async function POST(req: Request) {
       email = body.email ?? null;
       name = body.name ?? null;
       why = body.why ?? null;
+      password = body.password ?? null;
       referralCode = body.referralCode ?? null;
     } else {
       const formData = await req.formData();
       email = (formData.get("email") ?? "").toString() || null;
       name = (formData.get("name") ?? "").toString() || null;
+      password = (formData.get("password") ?? "").toString() || null;
       referralCode = (formData.get("referralCode") ?? "").toString() || null;
     }
 
@@ -42,6 +45,13 @@ export async function POST(req: Request) {
 
     if (!email || !why) {
       return NextResponse.json({ error: "email and why are required" }, { status: 400 });
+    }
+
+    if (!password || password.length < 12) {
+      return NextResponse.json(
+        { error: "Password must be at least 12 characters" },
+        { status: 400 },
+      );
     }
 
     const existingUser = await db.user.findUnique({ where: { email } });
@@ -103,6 +113,7 @@ export async function POST(req: Request) {
         name: name ?? null,
         role: "user",
         tier: "1",
+        password: await hashPassword(password),
       },
     });
 

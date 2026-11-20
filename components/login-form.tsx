@@ -15,6 +15,7 @@ import { useState } from "react";
 export function LoginForm({ refCode }: { refCode?: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,7 +27,7 @@ export function LoginForm({ refCode }: { refCode?: string }) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, ...(refCode ? { ref: refCode } : {}) }),
+        body: JSON.stringify({ email, password, ...(refCode ? { ref: refCode } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -56,6 +57,19 @@ export function LoginForm({ refCode }: { refCode?: string }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@company.com"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-xs font-mono text-fg-muted">Password</label>
+        <input
+          name="password"
+          type="password"
+          required
+          className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••••••"
         />
       </div>
 
