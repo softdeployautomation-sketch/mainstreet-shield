@@ -54,8 +54,38 @@ Files edited/created:
 4. app/api/auth/settings/password/route.ts — passwordRateLimit (5/IP/15min); 429 + Retry-After after session check, before password validation ✔
 middleware.ts untouched. No schema change / no prisma migrate. No secrets in diff.
 
-## Remaining
-- Commit changes — PENDING (S0-1/S0-2 commits already on main)
-- Master plan updated: TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md marks S0-2 as DONE
-- Master plan updated: TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md marks S0-1, S0-6, S1-1 as DONE — commit 00ef11e
-- Hand off to verification agent for live acceptance criteria (AC-1 to AC-13) against deployed site
+## Deploy state (verified this session — both repos green)
+- mainstreet-shield `5a4dea5` (S0-3 rate limiting): `tsc --noEmit` = 0 ✓, `lib/rate-limit.ts` present on VPS (deployed) ✓, `mainstreet-shield.service` active ✓
+- spaceworker `9fb86d8` (S0-8 admin delete UI): `tsc --noEmit` = 0 ✓, `spaceworker.service` active ✓, deployed per owner confirmation ✓
+- `prisma validate` locally requires `DATABASE_URL` (no `.env` checked in locally — expected, not a code issue)
+
+## Remaining (per reprioritised Phase 0 — SVE prompt)
+- **S0-4 DONE** — Remove `SESSION_SECRET` fallback `dev-secret-change-me` (fail if missing in production). Spec: `task/TASK_258_S04_SESSION_SECRET.md`
+  - Branch: `task-258-s04-session-secret`
+  - Commit: `c48230306fcb76ef37997a9f5bfd2bdbabcaa960`
+  - Files: `lib/auth.ts`, `app/api/auth/signup/route.ts`, `app/api/admin/approve/route.ts`, `app/api/admin/tier/route.ts`
+  - `tsc --noEmit` = 0; bare `dev-secret-change-me` fallback removed from all 4 (dev-only fallback retained behind production fail-fast guard per spec §3)
+  - Rollback: revert the 4 files to `process.env.SESSION_SECRET || "dev-secret-change-me"` form; no DB/schema involved.
+  - Not deployed — owner dispatches via GitHub Actions `workflow_dispatch`.
+- S0-5 — Email verification / password reset flow (spec needed)
+- S0-7 — Admin audit log (spec needed)
+- Master plan `TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md` to be restructured to match this priority order
+
+## Handoff record — TASK_258_S04 (S0-4)
+- Branch: `task-258-s04-session-secret` (from `main`, commit `c48230306fcb76ef37997a9f5bfd2bdbabcaa960`, not pushed)
+- Commit: `c48230306fcb76ef37997a9f5bfd2bdbabcaa960` — "S0-4: fail fast if SESSION_SECRET missing in production"
+- Files changed (commit limited to 4): `lib/auth.ts`, `app/api/auth/signup/route.ts`, `app/api/admin/approve/route.ts`, `app/api/admin/tier/route.ts`
+- `tsc --noEmit` = 0 ✔
+- `git diff --stat` (main…branch) limited to the 4 files ✔
+- Risks: fail-fast throws at module load in production if SESSION_SECRET unset — VPS already runs with SESSION_SECRET set (spec §4), safe on deploy.
+- Rollback: revert the 4 files to the `process.env.SESSION_SECRET || "dev-secret-change-me"` form; no DB/schema involved.
+- No secrets committed or printed. `.env.example` unchanged (still documents SESSION_SECRET).
+- Next: await SVE Phase A local checks, then owner deploy + Phase B live verification vs https://mainstreetmint.click (AC-1…AC-8).
+
+## Hard rules (unchanged)
+- NO DEPLOY (owner dispatches via GitHub Actions `workflow_dispatch`)
+- NO `git push` to `main`/shared branches (Task Agent commits on branches only)
+- NO `prisma migrate`/`db push`/schema change unless explicitly approved per subtask
+- No secrets: never print/commit `.env`, `MAINSTREET_SERVICE_TOKEN`, `SESSION_SECRET`, or any keys
+- Do not touch: middleware `/signup ?ref` stamping, `app/r/[code]/route.ts` cookie attrs, `ReferralLink @@map`, mainstreet proxies, hardcoded service token
+- One subtask at a time — report completion before starting the next

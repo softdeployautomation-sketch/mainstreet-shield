@@ -14,12 +14,20 @@ import { createRateLimiter } from "@/lib/rate-limit";
 const signupRateLimit = createRateLimiter(15 * 60 * 1000, 3);
 
 const rawSecret = process.env.SESSION_SECRET;
-if (!rawSecret && process.env.NODE_ENV === "production") {
-  throw new Error("SESSION_SECRET must be set in production");
+// Defer the production fail-fast to call time so `next build` in CI
+// (NODE_ENV=production, no SESSION_SECRET) doesn't fail at module load.
+const SESSION_SECRET = rawSecret
+  ? new TextEncoder().encode(rawSecret)
+  : null;
+const SESSION_SECRET_MISSING_IN_PROD =
+  !rawSecret && process.env.NODE_ENV === "production";
+
+function requireSessionSecret(): Uint8Array {
+  if (SESSION_SECRET_MISSING_IN_PROD) {
+    throw new Error("SESSION_SECRET must be set in production");
+  }
+  return SESSION_SECRET ?? new TextEncoder().encode("dev-secret-change-me");
 }
-const SESSION_SECRET = new TextEncoder().encode(
-  rawSecret || "dev-secret-change-me"
-);
 
 export async function POST(req: Request) {
   try {
@@ -241,7 +249,7 @@ export async function GET() {
   }
   try {
     const { jwtVerify } = await import("jose");
-    const { payload } = await jwtVerify(token, SESSION_SECRET);
+    const { payload } = await jwtVerify(token, requireSessionSecret());
     return NextResponse.json({
       userId: payload.userId as string,
       email: payload.email as string,

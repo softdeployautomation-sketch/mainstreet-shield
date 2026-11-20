@@ -7,12 +7,22 @@ import bcrypt from "bcrypt";
 import { db } from "./db";
 
 const rawSecret = process.env.SESSION_SECRET;
-if (!rawSecret && process.env.NODE_ENV === "production") {
-  throw new Error("SESSION_SECRET must be set in production");
+// Defer the production fail-fast to call time so `next build` in CI
+// (NODE_ENV=production, no SESSION_SECRET) doesn't fail at module load.
+// In production without SESSION_SECRET, any session operation throws below,
+// preventing forgeable sessions — but the build itself succeeds.
+const SESSION_SECRET = rawSecret
+  ? new TextEncoder().encode(rawSecret)
+  : null;
+const SESSION_SECRET_MISSING_IN_PROD =
+  !rawSecret && process.env.NODE_ENV === "production";
+
+function requireSessionSecret(): Uint8Array {
+  if (SESSION_SECRET_MISSING_IN_PROD) {
+    throw new Error("SESSION_SECRET must be set in production");
+  }
+  return SESSION_SECRET ?? new TextEncoder().encode("dev-secret-change-me");
 }
-const SESSION_SECRET = new TextEncoder().encode(
-  rawSecret || "dev-secret-change-me"
-);
 
 export interface Session {
   userId: string;
@@ -27,7 +37,7 @@ export async function getSession(): Promise<Session | null> {
   if (!token) return null;
 
   try {
-    const { payload } = await jwtVerify(token, SESSION_SECRET);
+    const { payload } = await jwtVerify(token, requireSessionSecret());
     return {
       userId: payload.userId as string,
       email: payload.email as string,
@@ -54,7 +64,7 @@ export async function createSession(user: {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(SESSION_SECRET);
+    .sign(requireSessionSecret());
 
   const cookieStore = await cookies();
   cookieStore.set("shield-session", token, {
