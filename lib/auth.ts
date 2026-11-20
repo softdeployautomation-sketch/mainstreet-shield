@@ -6,8 +6,12 @@ import { jwtVerify, SignJWT } from "jose";
 import bcrypt from "bcrypt";
 import { db } from "./db";
 
+const rawSecret = process.env.SESSION_SECRET;
+if (!rawSecret && process.env.NODE_ENV === "production") {
+  throw new Error("SESSION_SECRET must be set in production");
+}
 const SESSION_SECRET = new TextEncoder().encode(
-  process.env.SESSION_SECRET || "dev-secret-change-me"
+  rawSecret || "dev-secret-change-me"
 );
 
 export interface Session {
