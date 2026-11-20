@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/auth";
+import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
@@ -13,6 +13,11 @@ export const dynamic = "force-dynamic";
 export default async function CompanyPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+
+  // S0-2: require password — redirect to Settings to create one
+  const pw = await requirePasswordUser(session);
+  if (!pw.user) redirect("/login");
+  if (pw.needPassword) redirect("/settings?need-password=1");
 
   // Check if user already has a company
   const existing = await db.company.findUnique({

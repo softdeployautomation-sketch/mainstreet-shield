@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ShieldVmPanel } from "@/components/shield-vm-panel";
 
@@ -8,6 +8,11 @@ export const dynamic = "force-dynamic";
 export default async function ShieldPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+
+  // S0-2: require password — redirect to Settings to create one
+  const pw = await requirePasswordUser(session);
+  if (!pw.user) redirect("/login");
+  if (pw.needPassword) redirect("/settings?need-password=1");
 
   const user = await db.user.findUnique({
     where: { id: session.userId },

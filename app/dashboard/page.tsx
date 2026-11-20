@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/auth";
+import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getUserReferralLink } from "@/lib/referral";
 import CopyButton from "@/components/CopyButton";
@@ -68,6 +68,11 @@ const TABS: Tab[] = [
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+
+  // S0-2: require password — redirect to Settings to create one
+  const pw = await requirePasswordUser(session);
+  if (!pw.user) redirect("/login");
+  if (pw.needPassword) redirect("/settings?need-password=1");
 
   const user = await db.user.findUnique({
     where: { id: session.userId },

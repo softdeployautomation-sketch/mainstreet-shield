@@ -8,7 +8,7 @@ import { DeleteAccountForm } from "@/components/delete-account-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams: { [key: string]: string } }) {
   const session = await getSession();
   if (!session) redirect("/login");
 
@@ -103,6 +103,37 @@ export default async function SettingsPage() {
             </div>
           </dl>
         </div>
+
+        {/* S0-2: password setup prompt */}
+        {searchParams["need-password"] === "1" && (
+          <div className="mt-8 rounded-xl border border-rose-500/30 bg-rose-900/20 p-6">
+            <h2 className="text-lg font-display font-bold text-rose-400 mb-2">
+              Set Your Password
+            </h2>
+            <p className="text-sm text-fg-muted mb-4">
+              Your account was created before password authentication was required.
+              Please set a password to continue using MainStreet Shield.
+            </p>
+            <form action="/api/auth/settings/password" method="post" className="space-y-3 max-w-md">
+              <div>
+                <label className="block text-xs text-fg-muted mb-1">New password (min 12 chars)</label>
+                <input
+                  name="password"
+                  type="password"
+                  minLength="12"
+                  required
+                  className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <button
+                type="submit"
+                className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+              >
+                Save Password
+              </button>
+            </form>
+          </div>
+        )}
 
         <div className="mt-8 rounded-xl border border-border bg-bg-elevated p-6">
           <DeleteAccountForm userId={user.id} />

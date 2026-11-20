@@ -36,5 +36,19 @@ Files created:
 - npx prisma validate passes ✔
 - bcrypt native bindings work (no package.json change needed; no secrets committed)
 
+## Phase: S0-2 Password Verification Middleware (DONE)
+Files edited/created:
+1. lib/auth.ts — refactored requirePasswordUser to return PasswordCheck { user, needPassword } ✔
+2. app/dashboard/page.tsx — added requirePasswordUser call + redirect after session check ✔
+3. app/shield/page.tsx — added requirePasswordUser call + redirect after session check ✔
+4. app/agent/page.tsx — added requirePasswordUser call + redirect after session check ✔
+5. app/company/page.tsx — added requirePasswordUser call + redirect after session check ✔
+6. app/settings/page.tsx — accept searchParams prop + "Set Your Password" prompt section ✔
+7. app/api/auth/settings/password/route.ts — NEW POST endpoint (session-gated, min-12, bcrypt hash, db.user.update) ✔
+
 ## Remaining
-- Commit, record SHA in master plan TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md
+- npx tsc --noEmit = 0 — PENDING (shell integration issue preventing command execution)
+- Commit changes — PENDING
+- Master plan updated: TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md marks S0-2 as DONE
+- Master plan updated: TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md marks S0-1, S0-6, S1-1 as DONE — commit 00ef11e
+- Hand off to verification agent for live acceptance criteria (AC-1 to AC-13) against deployed site

@@ -77,28 +77,34 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
+export interface PasswordCheck {
+  user: {
+    id: string;
+    email: string;
+    password: string | null;
+    role: string;
+    tier: string;
+  } | null;
+  needPassword: boolean;
+}
+
 /**
- * Require that the authenticated user has a password set.
- * Returns the user record or throws an appropriate NextResponse error.
+ * Check whether the authenticated user has a password set.
+ * Returns { user, needPassword } — never throws for control flow.
+ * Server Components can use this directly without try/catch.
  */
-export async function requirePasswordUser(session: Session) {
+export async function requirePasswordUser(session: Session): Promise<PasswordCheck> {
   const user = await db.user.findUnique({
     where: { id: session.userId },
     select: { id: true, email: true, password: true, role: true, tier: true },
   });
   if (!user) {
-    throw new NextResponse(
-      JSON.stringify({ error: "user not found" }),
-      { status: 404, headers: { "Content-Type": "application/json" } },
-    );
+    return { user: null, needPassword: true };
   }
-  if (!user.password) {
-    throw new NextResponse(
-      JSON.stringify({ error: "password not set — please create one in Settings" }),
-      { status: 403, headers: { "Content-Type": "application/json" } },
-    );
-  }
-  return user;
+  return {
+    user,
+    needPassword: !user.password,
+  };
 }
 
 export async function requireAdmin(session: Session | null) {
