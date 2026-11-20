@@ -43,6 +43,7 @@ export async function GET(req: Request) {
       name: true,
       role: true,
       tier: true,
+      referralLink: { select: { code: true } },
       createdAt: true,
     },
     orderBy: { createdAt: "desc" },
