@@ -182,6 +182,7 @@ model Referral {
 // ---------------------------------------------------------------------------
 // ReferralLink — every user owns one shareable link (like SpaceWorker)
 // ---------------------------------------------------------------------------
+// NOTE: DB table is `referrallink` (lowercase), map to match
 model ReferralLink {
   id          String   @id @default(cuid())
   code        String   @unique
