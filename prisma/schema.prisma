@@ -184,6 +184,7 @@ model Referral {
 // ---------------------------------------------------------------------------
 // NOTE: DB table is `referrallink` (lowercase), map to match
 model ReferralLink {
+  // NOTE: DB table is `referrallink` (lowercase), map to match
   id          String   @id @default(cuid())
   code        String   @unique
   userId      String   @unique
@@ -193,6 +194,8 @@ model ReferralLink {
   createdAt   DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("referrallink")
 }
 
 // ---------------------------------------------------------------------------
