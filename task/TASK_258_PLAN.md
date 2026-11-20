@@ -71,6 +71,19 @@ middleware.ts untouched. No schema change / no prisma migrate. No secrets in dif
 - S0-7 — Admin audit log (spec needed)
 - Master plan `TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md` to be restructured to match this priority order
 
+## Phase: S2-8 Cline API key settings on Settings page (DONE)
+Spec: task/TASK_258_S2_8_CLINE_SETTINGS.md
+Branch: task-258-s2-8-cline-settings (from main, commit 82eb71b, not pushed)
+Commit: 82eb71b — "S2-8: Cline API key settings on Settings page"
+Files changed (8): .env.example, app/api/settings/cline/route.ts, app/settings/page.tsx, components/cline-settings-card.tsx, lib/crypto.ts, lib/settings.ts, prisma/schema.prisma, task/S2-8-PLAN.md
+- `tsc --noEmit` = 0 ✔
+- `git diff --stat` limited to spec files ✔
+- No secrets committed (CLINE_ENCRYPTION_KEY is a placeholder in .env.example only) ✔
+- Schema change (UserSettings model) NOT applied — owner must approve + run prisma migrate/db push before deploy
+- Risks: New table requires DB migration; CLINE_ENCRYPTION_KEY must be set in .env for encryption to work; without it, encryptSecret/decryptSecret throw at call time.
+- Rollback: revert the 8 files; remove UserSettings model from schema.prisma; no data migration needed (new table only).
+- Next: await SVE Phase A local checks, then owner deploy + Phase B live verification vs https://mainstreetmint.click.
+
 ## Handoff record — TASK_258_S04 (S0-4)
 - Branch: `task-258-s04-session-secret` (from `main`, commit `c48230306fcb76ef37997a9f5bfd2bdbabcaa960`, not pushed)
 - Commit: `c48230306fcb76ef37997a9f5bfd2bdbabcaa960` — "S0-4: fail fast if SESSION_SECRET missing in production"
