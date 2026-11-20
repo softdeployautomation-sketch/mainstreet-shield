@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getUserReferralLink } from "@/lib/referral";
+import CopyButton from "@/components/CopyButton";
 
 export const metadata: Metadata = {
   title: "Dashboard — MainStreet Shield",
@@ -83,15 +85,8 @@ export default async function DashboardPage() {
     },
   });
 
-  const referral = await db.referral.findFirst({
-    where: {
-      OR: [
-        { referrerId: session.userId },
-        { referredId: session.userId },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // User's personal /r/<code> login referral (not the admin-generated Referral model).
+  const referralLink = await getUserReferralLink(session.userId);
 
   const assets = company?.assets ?? [];
   const workflows = company?.workflows ?? [];
@@ -309,24 +304,18 @@ export default async function DashboardPage() {
           </div>
         </section>
 
-        {referral && (
+        {referralLink && (
           <section className="mb-8">
             <div className="rounded-xl border border-border bg-bg-elevated p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-display font-bold">Your Referral</h2>
-                <button
-                  onClick={() => {
-                    const link = `${window.location.origin}/signup?ref=${referral.code}`;
-                    navigator.clipboard.writeText(link);
-                  }}
-                  className="text-xs font-mono text-brand-600 hover:underline"
-                >
-                  Copy referral link
-                </button>
+                <CopyButton link={`https://mainstreetmint.click/r/${referralLink.code}`} label="Copy link" />
               </div>
               <div className="flex items-center gap-4">
-                <div className="font-mono text-sm bg-zinc-100/50 px-3 py-1.5 rounded border border-zinc-200/50 dark:bg-zinc-800/50 dark:border-zinc-700">{referral.code}</div>
-                <span className="text-xs text-fg-muted">Share: /signup?ref={referral.code}</span>
+                <div className="font-mono text-sm bg-zinc-100/50 px-3 py-1.5 rounded border border-zinc-200/50 dark:bg-zinc-800/50 dark:border-zinc-700 break-all">
+                  https://mainstreetmint.click/r/{referralLink.code}
+                </div>
+                <span className="text-xs text-fg-muted">Share: /signup?ref={referralLink.code}</span>
               </div>
             </div>
           </section>

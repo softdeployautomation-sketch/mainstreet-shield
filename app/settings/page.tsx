@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getUserReferralLink } from "@/lib/referral";
+import CopyButton from "@/components/CopyButton";
 
 export const dynamic = "force-dynamic";
 
@@ -88,22 +89,15 @@ export default async function SettingsPage() {
               <dd className="font-mono text-xs">{new Date(user.createdAt).toLocaleDateString()}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-fg-muted">Your referral code</dt>
-              <dd className="font-mono">{referralLink.code}</dd>
+              <dt className="text-fg-muted">Your referral link</dt>
+              <dd className="font-mono text-sm break-all">
+                https://mainstreetmint.click/r/{referralLink.code}
+              </dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-fg-muted">Copy referral link</dt>
               <dd className="font-mono text-xs text-brand-600 dark:text-brand-400">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const link = `${window.location.origin}/r/${referralLink.code}`;
-                    navigator.clipboard.writeText(link);
-                  }}
-                  className="hover:underline cursor-pointer"
-                >
-                  {referralLink.code}
-                </button>
+                <CopyButton link={`https://mainstreetmint.click/r/${referralLink.code}`} label="Copy link" />
               </dd>
             </div>
           </dl>
