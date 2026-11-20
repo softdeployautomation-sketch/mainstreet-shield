@@ -64,12 +64,24 @@ export async function POST(req: Request) {
       email: string | null;
       createdBy: string;
     } | null = null;
+    // Third shape accepted by hasAccessGate: a pending legacy Referral row
+    // (minted by POST /api/admin/referrals with no SignupInvite twin). The page
+    // gate already accepts it, so the API must too — otherwise a code passes
+    // /signup and then 400s on submit (verification finding F1).
+    let legacyReferrerId: string | null = null;
 
     referredLink = await validateReferral(referralCode);
     if (!referredLink) {
       invite = await getInviteByCode(referralCode);
     }
     if (!referredLink && !invite) {
+      const legacy = await db.referral.findUnique({
+        where: { code: referralCode },
+        select: { id: true, status: true, referrerId: true },
+      });
+      if (legacy && legacy.status === "pending") legacyReferrerId = legacy.referrerId;
+    }
+    if (!referredLink && !invite && !legacyReferrerId) {
       return NextResponse.json(
         { error: "Invalid or already used referral code" },
         { status: 400 },
@@ -124,11 +136,23 @@ export async function POST(req: Request) {
       }
       // Mark the legacy Referral row claimed for backward compatibility.
       await claimReferralCode(referralCode, user.id);
+    } else if (legacyReferrerId && legacyReferrerId !== user.id) {
+      // Legacy Referral-only code: attribute to the referrer's own link.
+      const referrerLink = await getUserReferralLink(legacyReferrerId).catch(() => null);
+      if (referrerLink) {
+        await attributeReferral({
+          userId: user.id,
+          linkId: referrerLink.id,
+          referrerCode: referrerLink.code,
+          referrerEmail: "",
+        }).catch(() => undefined);
+      }
+      await claimReferralCode(referralCode, user.id);
     }
 
     // Every new user gets their own shareable link (Bug #3 fix, G6).
     // Wrapped in .catch so a link failure never fails a signup.
-    await getUserReferralLink(user.id).catch(() => undefined);
+    const ownLink = await getUserReferralLink(user.id).catch(() => null);
 
     await db.pendingSignup.upsert({
       where: { email },
@@ -164,7 +188,7 @@ export async function POST(req: Request) {
         ok: true,
         userId: user.id,
         tier: user.tier,
-        referralLink: null,
+        referralLink: ownLink ? `/r/${ownLink.code}` : null,
         redirectTo,
         message: "Account created. You have Tier 1 access — explore the lab tools.",
       },

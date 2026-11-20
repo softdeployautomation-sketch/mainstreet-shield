@@ -33,8 +33,12 @@ export async function middleware(request: NextRequest) {
   const isReferralGated = referralGatedPaths.some((p) => path === p || path.startsWith(p + "/"));
 
   if (isShieldDomain && isReferralGated) {
-    // Allow ?ref=CODE on /signup: validate, set cookie, then proceed.
-    if (path === "/signup") {
+    // Allow ?ref=CODE on /signup and /login: validate, set cookie, then proceed.
+    // /login needs this too — without it a visitor arriving at /login?ref=CODE
+    // (no sw_ref yet) is bounced to / before the page gate runs, and even a
+    // successful login would then be kicked off /dashboard for the missing
+    // cookie (verification finding F3).
+    if (path === "/signup" || path === "/login") {
       const ref = request.nextUrl.searchParams.get("ref");
       if (ref && !swRef) {
         let valid = false;
