@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import { createSession, hashPassword, SESSION_SECRET } from "@/lib/auth";
+import { createSession, hashPassword } from "@/lib/auth";
+import { SESSION_SECRET } from "@/lib/session-secret";
 import {
   validateReferral,
   attributeReferral,
