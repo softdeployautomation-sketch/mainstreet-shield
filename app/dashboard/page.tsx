@@ -19,7 +19,7 @@ const tierLabels: Record<string, string> = {
 
 const tierDescriptions: Record<string, string> = {
   "1": "Limited access - explore lab tools, view assets and workflows. Cannot create VMs or run agents.",
-  "3": "Researcher access - can run Cline agent sessions and view all lab tools.",
+  "3": "Researcher access - can run MSS Agent sessions and view all lab tools.",
   "5": "Full access - can create VMs, run agents, manage company assets and workflows.",
 };
 
@@ -208,7 +208,7 @@ export default async function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {assets.slice(0, 5).map((asset) => (
+                  {assets.slice(0, 5).map((asset: any) => (
                     <tr key={asset.id} className="border-b border-border/50 last:border-0">
                       <td className="px-4 py-3 font-mono text-sm">{asset.target}</td>
                       <td className="px-4 py-3 text-xs font-mono text-fg-muted">{asset.type}</td>
@@ -253,7 +253,7 @@ export default async function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {workflows.slice(0, 5).map((wf) => (
+                  {workflows.slice(0, 5).map((wf: any) => (
                     <tr key={wf.id} className="border-b border-border/50 last:border-0">
                       <td className="px-4 py-3 font-mono text-sm">{wf.name}</td>
                       <td className="px-4 py-3 text-xs font-mono text-fg-muted">{wf.companyId}</td>
