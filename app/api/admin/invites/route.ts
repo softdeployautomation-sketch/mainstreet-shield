@@ -22,9 +22,11 @@ export async function POST(req: Request) {
   } else if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   } else {
-    await requireAdmin(session).catch(() =>
-      NextResponse.json({ error: "forbidden" }, { status: 403 })
-    );
+    try {
+      await requireAdmin(session);
+    } catch {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
   }
 
   // Resolve creator userId — session admin or service-token fallback

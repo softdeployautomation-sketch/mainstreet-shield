@@ -8,10 +8,20 @@ const loginSchema = z.object({
 });
 
 // POST /api/auth/login — email-only sign in (magic-link style, no password)
+// Accepts both JSON and urlencoded form bodies (the /login form posts a form).
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const data = loginSchema.parse(body);
+    let email: string | null = null;
+    const contentType = req.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const body = await req.json();
+      email = body.email ?? null;
+    } else {
+      const formData = await req.formData();
+      email = (formData.get("email") ?? "").toString() || null;
+    }
+
+    const data = loginSchema.parse({ email });
 
     const user = await db.user.findUnique({
       where: { email: data.email },
@@ -27,7 +37,13 @@ export async function POST(req: Request) {
       tier: user.tier,
     });
 
-    return NextResponse.json({ ok: true, userId: user.id, role: user.role, tier: user.tier });
+    return NextResponse.json({
+      ok: true,
+      userId: user.id,
+      role: user.role,
+      tier: user.tier,
+      redirectTo: "/dashboard",
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(

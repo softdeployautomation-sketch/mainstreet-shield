@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { createSession } from "@/lib/auth";
-import { db } from "@/lib/db";
 import { hasAccessGate } from "@/lib/referral";
+import { LoginForm } from "@/components/login-form";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +23,7 @@ export default async function LoginPage({
     ? resolvedParams.ref[0]
     : resolvedParams.ref;
 
-  // Referral gate: need valid sw_ref cookie or ?ref=CODE to see login form
+  // Referral gate: need valid sw_ref cookie or ?ref=CODE to see login form.
   let hasAccess = refCookie ? await hasAccessGate(refCookie) : false;
 
   if (!hasAccess && refQuery) {
@@ -59,26 +58,7 @@ export default async function LoginPage({
             Enter your email to sign in. No password required — sign-in is via
             referral link only.
           </p>
-
-          <form action="/api/auth/login" method="POST" className="space-y-6">
-            <div className="space-y-2">
-              <label className="block text-xs font-mono text-fg-muted">Email address</label>
-              <input
-                name="email"
-                type="email"
-                required
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
-                placeholder="you@company.com"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full rounded bg-brand-600 text-white font-mono font-bold py-4 hover:bg-brand-700 transition-colors"
-            >
-              Sign in
-            </button>
-          </form>
+          <LoginForm ref={refQuery ?? undefined} />
 
           <p className="mt-6 text-xs font-mono text-fg-muted text-center">
             Don't have an account?{" "}

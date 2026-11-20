@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { hasAccessGate } from "@/lib/referral";
+import { SignupForm } from "@/components/signup-form";
 
 export const metadata: Metadata = {
   title: "Apply for Access — MainStreet Shield",
@@ -18,8 +19,6 @@ export default async function SignupPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  if (await getSession()) redirect("/dashboard");
-
   const cookieStore = await cookies();
   const refCookie = cookieStore.get(REFERRAL_COOKIE)?.value;
   const resolvedSearchParams = await searchParams;
@@ -27,13 +26,27 @@ export default async function SignupPage({
     ? resolvedSearchParams.ref[0]
     : resolvedSearchParams.ref;
 
+  // Resolve access BEFORE the session check (G11): a signed-in visitor holding a
+  // valid ref may still see the form; only a ref-less signed-in visitor bounces.
   let hasAccess = refCookie ? await hasAccessGate(refCookie) : false;
-
-  const referralError = !hasAccess ? "A valid referral link is required to apply." : null;
-
   if (refQuery && !hasAccess) {
     hasAccess = await hasAccessGate(refQuery);
   }
+
+  const session = await getSession();
+
+  // No valid access: a session holder goes to /dashboard, everyone else to the
+  // gated homepage.
+  if (!hasAccess) {
+    if (session) redirect("/dashboard");
+    redirect("/?error=referral_required");
+  }
+
+  // Valid access. A signed-in visitor is shown the form with a dismissible-style
+  // notice (and a Go to dashboard link) so they're never trapped at /dashboard.
+  const signedInNotice = session
+    ? `You're signed in as ${session.email}. This form creates a new account.`
+    : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg flex flex-col">
@@ -62,73 +75,29 @@ export default async function SignupPage({
             and we will review it. You will hear back by email.
           </p>
 
-          {referralError && (
-            <div className="mb-8 p-4 rounded bg-brand-50/40 border border-brand-300/40 text-brand-700 text-xs font-mono dark:bg-brand-800/10 dark:border-brand-700/30 dark:text-brand-300">
-              {referralError}
+          {signedInNotice && (
+            <div className="mb-6 p-4 rounded bg-blue-50 border border-blue-200 text-sm text-blue-800 dark:bg-blue-900/20 dark:border-blue-800/30 dark:text-blue-200">
+              {signedInNotice}{" "}
+              <Link
+                href="/dashboard"
+                className="font-medium underline ml-2 hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                Go to dashboard
+              </Link>
             </div>
           )}
 
-          <form
-            className="space-y-6"
-            action="/api/auth/signup"
-            method="POST"
-          >
-            <input type="hidden" name="referralCode" value={refQuery ?? ""} />
+          <SignupForm ref={refQuery ?? undefined} />
 
-            <div className="space-y-2">
-              <label className="block text-xs font-mono text-fg-muted">Email address</label>
-              <input
-                name="email"
-                type="email"
-                required
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
-                placeholder="you@company.com"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-mono text-fg-muted">Name (optional)</label>
-              <input
-                name="name"
-                type="text"
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
-                placeholder="Your name"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-mono text-fg-muted">
-                Why do you need MainStreet Shield?
-              </label>
-              <textarea
-                name="why"
-                rows={6}
-                required
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
-                placeholder="Tell us about your business, what you want to secure, and why you need access to the lab..."
-              ></textarea>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full rounded bg-brand-600 text-white font-mono font-bold py-4 hover:bg-brand-700 transition-colors"
-            >
-              Submit application
-            </button>
-          </form>
+          <p className="mt-6 text-center text-sm text-fg-muted">
+            Already have an account?{" "}
+            <Link href="/login" className="font-medium text-brand-600 hover:underline">
+              Sign in
+            </Link>
+          </p>
         </div>
       </section>
     </div>
   );
 }
 
-async function hasAccessGate(ref: string): Promise<boolean> {
-  try {
-    const referral = await db.referral.findUnique({
-      where: { code: ref },
-    });
-    return !!referral && referral.status === "pending";
-  } catch {
-    return false;
-  }
-}

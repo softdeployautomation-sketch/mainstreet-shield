@@ -104,6 +104,27 @@ export async function getReferralLinkByCode(
   return mapLink(link);
 }
 
+/** Look up an active, unredeemed, unexpired signup invite by its token/code. */
+export async function getInviteByCode(
+  code: string
+): Promise<{
+  id: string;
+  token: string;
+  email: string | null;
+  createdBy: string;
+  usedById: string | null;
+  expiresAt: Date;
+} | null> {
+  const invite = await db.signupInvite.findUnique({
+    where: { token: code },
+    select: { id: true, token: true, email: true, createdBy: true, usedById: true, expiresAt: true },
+  });
+  if (!invite) return null;
+  if (invite.usedById) return null;
+  if (new Date(invite.expiresAt) <= new Date()) return null;
+  return invite;
+}
+
 /** Increment the click counter on a link (called when /r/:code is hit). */
 export async function recordReferralClick(code: string): Promise<void> {
   await db.referralLink.update({
@@ -127,7 +148,8 @@ export async function validateReferral(
 /**
  * Attribute `userId` to the referral that brought them in.
  * Sets referredBy (referrer's code) + referredByLinkId (FK), and bumps
- * the link's conversion counter.
+ * the link's conversion counter. Idempotent: only writes when the link
+ * actually changed; wrapped in a transaction.
  */
 export async function attributeReferral({
   userId,
@@ -140,18 +162,25 @@ export async function attributeReferral({
   referrerCode: string;
   referrerEmail: string;
 }): Promise<void> {
-  await db.user.update({
+  const existing = await db.user.findUnique({
     where: { id: userId },
-    data: {
-      referredBy: referrerCode,
-      referredByLinkId: linkId,
-    },
+    select: { referredByLinkId: true, referredBy: true },
   });
+  if (!existing) return;
+  if (existing.referredByLinkId === linkId && existing.referredBy === referrerCode) {
+    return; // already attributed
+  }
 
-  await db.referralLink.update({
-    where: { id: linkId },
-    data: { conversions: { increment: 1 } },
-  });
+  await db.$transaction([
+    db.user.update({
+      where: { id: userId },
+      data: { referredBy: referrerCode, referredByLinkId: linkId },
+    }),
+    db.referralLink.update({
+      where: { id: linkId },
+      data: { conversions: { increment: 1 } },
+    }),
+  ]);
 }
 
 /** Mark a referral link as claimed (status change for Referral model backward compat). */
@@ -167,11 +196,21 @@ export async function claimReferralCode(
 
 /**
  * Combined ACCESS gate for the /login and /signup pages: a code grants access if
- * it is a valid active universal referral link. Returns a plain boolean.
+ * it is EITHER a valid active universal referral link OR an active, unredeemed,
+ * unexpired SignupInvite OR a Referral with status "pending". Returns a plain
+ * boolean — the pages only need "may this visitor proceed?", not the link object.
+ * The hard invite email-match is enforced later, in the signup route.
  */
 export async function hasAccessGate(code: string): Promise<boolean> {
   const ref = await validateReferral(code);
-  return !!ref;
+  if (ref) return true;
+  const invite = await getInviteByCode(code);
+  if (invite) return true;
+  const referral = await db.referral.findUnique({
+    where: { code },
+    select: { id: true, status: true },
+  });
+  return !!referral && referral.status === "pending";
 }
 
 function mapLink(l: {

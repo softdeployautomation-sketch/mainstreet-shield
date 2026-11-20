@@ -19,23 +19,12 @@ export async function middleware(request: NextRequest) {
   // Public homepage — never redirect.
   if (path === "/") return NextResponse.next();
 
-  // /r/:code — validate referral code, set sw_ref cookie, redirect to /signup.
+  // /r/:code — let app/r/[code]/route.ts own it (validates ReferralLink +
+  // SignupInvite, stamps sw_ref cookie, 302s to /login). Middleware must not
+  // intercept it, or personal share links and admin invite links never reach
+  // the route handler.
   if (path.startsWith("/r/")) {
-    const code = path.slice(3); // strip "/r/"
-    // Validate against the referral API.
-    const res = await fetch(
-      "http://localhost:3000/api/admin/referrals/validate",
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) },
-    );
-    if (res.ok) {
-      const data = await res.json();
-      if (data.valid) {
-        const redirect = NextResponse.redirect(new URL("/signup", request.url));
-        redirect.cookies.set("sw_ref", code, { path: "/", maxAge: 60 * 60 * 24 * 30 }); // 30 days
-        return redirect;
-      }
-    }
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.next();
   }
 
   // Protected routes requiring referral gate.
@@ -50,8 +39,9 @@ export async function middleware(request: NextRequest) {
       if (ref && !swRef) {
         let valid = false;
         try {
+          const baseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
           const res = await fetch(
-            "http://localhost:3000/api/admin/referrals/validate",
+            `${baseUrl}/api/admin/referrals/validate`,
             { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: ref }) },
           );
           if (res.ok) {

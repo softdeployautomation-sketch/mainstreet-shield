@@ -19,9 +19,11 @@ export async function POST(req: Request) {
     if (!session) {
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
-    await requireAdmin(session).catch(() =>
-      NextResponse.json({ error: "forbidden" }, { status: 403 })
-    );
+    try {
+      await requireAdmin(session);
+    } catch {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
   }
 
   const { referrerEmail } = await req.json();
@@ -65,9 +67,11 @@ export async function GET(req: Request) {
     if (!session) {
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
-    await requireAdmin(session).catch(() =>
-      NextResponse.json({ error: "forbidden" }, { status: 403 })
-    );
+    try {
+      await requireAdmin(session);
+    } catch {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
   }
 
   const referrals = await db.referral.findMany({
