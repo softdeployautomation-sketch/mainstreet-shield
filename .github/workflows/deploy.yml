@@ -26,6 +26,8 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Prisma validate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npx prisma validate
 
   deploy:
