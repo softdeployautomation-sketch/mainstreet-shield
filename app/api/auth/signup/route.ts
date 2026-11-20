@@ -9,6 +9,9 @@ import {
   getInviteByCode,
   claimReferralCode,
 } from "@/lib/referral";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+const signupRateLimit = createRateLimiter(15 * 60 * 1000, 3);
 
 const SESSION_SECRET = new TextEncoder().encode(
   process.env.SESSION_SECRET || "dev-secret-change-me"
@@ -36,6 +39,14 @@ export async function POST(req: Request) {
       name = (formData.get("name") ?? "").toString() || null;
       password = (formData.get("password") ?? "").toString() || null;
       referralCode = (formData.get("referralCode") ?? "").toString() || null;
+    }
+
+    const ipCheck = signupRateLimit(req, "signup");
+    if (!ipCheck.allowed) {
+      return NextResponse.json(
+        { error: "Too many signup attempts. Try again later." },
+        { status: 429, headers: { "Retry-After": String(ipCheck.retryAfterSeconds) } }
+      );
     }
 
     if (!referralCode) {

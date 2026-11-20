@@ -46,9 +46,16 @@ Files edited/created:
 6. app/settings/page.tsx — accept searchParams prop + "Set Your Password" prompt section ✔
 7. app/api/auth/settings/password/route.ts — NEW POST endpoint (session-gated, min-12, bcrypt hash, db.user.update) ✔
 
+## Phase: S0-3 Rate limiting on auth endpoints (DONE)
+Files edited/created:
+1. lib/rate-limit.ts — NEW in-memory sliding-window rate limiter: createRateLimiter(windowMs, max), Map keyed by ip:endpoint, getClientIp() (x-forwarded-for → x-real-ip → "unknown"), setInterval cleanup every 5 min / 1-hour retention ✔
+2. app/api/auth/login/route.ts — loginRateLimit (5/IP/15min); 429 + Retry-After at top of POST, before user lookup ✔
+3. app/api/auth/signup/route.ts — signupRateLimit (3/IP/15min); 429 + Retry-After after body extraction, before referral gate ✔
+4. app/api/auth/settings/password/route.ts — passwordRateLimit (5/IP/15min); 429 + Retry-After after session check, before password validation ✔
+middleware.ts untouched. No schema change / no prisma migrate. No secrets in diff.
+
 ## Remaining
-- npx tsc --noEmit = 0 — PENDING (shell integration issue preventing command execution)
-- Commit changes — PENDING
+- Commit changes — PENDING (S0-1/S0-2 commits already on main)
 - Master plan updated: TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md marks S0-2 as DONE
 - Master plan updated: TASK_258_MAINSTREET_ARCHITECTURE_RESTRUCTURE.md marks S0-1, S0-6, S1-1 as DONE — commit 00ef11e
 - Hand off to verification agent for live acceptance criteria (AC-1 to AC-13) against deployed site

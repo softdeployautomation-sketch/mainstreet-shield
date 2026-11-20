@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { deleteSession, createSession, verifyPassword } from "@/lib/auth";
 import { z } from "zod";
+
+const loginRateLimit = createRateLimiter(15 * 60 * 1000, 5);
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -12,6 +15,14 @@ const loginSchema = z.object({
 // Accepts both JSON and urlencoded form bodies (the /login form posts a form).
 export async function POST(req: Request) {
   try {
+    const ipCheck = loginRateLimit(req, "login");
+    if (!ipCheck.allowed) {
+      return NextResponse.json(
+        { error: "Too many login attempts. Try again later." },
+        { status: 429, headers: { "Retry-After": String(ipCheck.retryAfterSeconds) } }
+      );
+    }
+
     let email: string | null = null;
     let password: string | null = null;
     const contentType = req.headers.get("content-type") ?? "";
