@@ -85,14 +85,23 @@ export async function POST(req: Request) {
 }
 
 // GET /api/admin/invites — list all invite tokens (admin only)
-export async function GET() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+// SpaceWorker admin proxy sends X-Service-Token header for server-to-server auth
+export async function GET(req: Request) {
+  const serviceToken = req.headers.get("X-Service-Token");
+  if (
+    serviceToken &&
+    serviceToken === process.env.MAINSTREET_SERVICE_TOKEN
+  ) {
+    // bypass session check — trusted SpaceWorker admin proxy
+  } else {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+    await requireAdmin(session).catch(() =>
+      NextResponse.json({ error: "forbidden" }, { status: 403 })
+    );
   }
-  await requireAdmin(session).catch(() =>
-    NextResponse.json({ error: "forbidden" }, { status: 403 })
-  );
 
   const invites = await db.signupInvite.findMany({
     include: {
