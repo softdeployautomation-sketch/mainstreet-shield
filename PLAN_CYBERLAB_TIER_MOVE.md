@@ -32,7 +32,7 @@ CyberLab access = **Tier 5** in MainStreet Shield. No separate `CyberLabGrant` m
 | 4 | Dashboard: Verify tier gating + MSS terminology | COMPLETE |
 | 5 | Settings: Verify tier display + MSS SSH key (no Cline text) | COMPLETE |
 | 6 | SpaceWorker: Add MainStreet Shield tier tab + remove CyberLab tab | COMPLETE |
-| 7 | Deploy + Verify both repos | IN PROGRESS |
+| 7 | Deploy + Verify both repos | COMPLETE |
 
 ---
 
