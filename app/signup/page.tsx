@@ -87,7 +87,7 @@ export default async function SignupPage({
             </div>
           )}
 
-          <SignupForm ref={refQuery ?? undefined} />
+          <SignupForm refCode={refQuery ?? undefined} />
 
           <p className="mt-6 text-center text-sm text-fg-muted">
             Already have an account?{" "}

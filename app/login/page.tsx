@@ -58,7 +58,7 @@ export default async function LoginPage({
             Enter your email to sign in. No password required — sign-in is via
             referral link only.
           </p>
-          <LoginForm ref={refQuery ?? undefined} />
+          <LoginForm refCode={refQuery ?? undefined} />
 
           <p className="mt-6 text-xs font-mono text-fg-muted text-center">
             Don't have an account?{" "}

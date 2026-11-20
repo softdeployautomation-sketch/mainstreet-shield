@@ -9,7 +9,10 @@ import { useState } from "react";
  * Replaces the old server <form action> that hit req.json() on urlencoded data
  * (which 500'd). The referral gate itself is enforced by middleware/page.
  */
-export function LoginForm({ ref }: { ref?: string }) {
+// NOTE: the prop must NOT be named `ref` — React reserves `ref`, and passing it
+// from a Server Component to a Client Component throws at render
+// ("Refs cannot be used in Server Components") — verification finding F5.
+export function LoginForm({ refCode }: { refCode?: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +26,7 @@ export function LoginForm({ ref }: { ref?: string }) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, ...(ref ? { ref } : {}) }),
+        body: JSON.stringify({ email, ...(refCode ? { ref: refCode } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

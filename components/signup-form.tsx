@@ -9,7 +9,10 @@ import { useState } from "react";
  * redirectTo returned by the API (/settings?ref=… or /settings) instead of
  * rendering raw JSON.
  */
-export function SignupForm({ ref }: { ref?: string }) {
+// NOTE: the prop must NOT be named `ref` — React reserves `ref`, and passing it
+// from a Server Component to a Client Component throws at render
+// ("Refs cannot be used in Server Components") — verification finding F5.
+export function SignupForm({ refCode }: { refCode?: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -29,7 +32,7 @@ export function SignupForm({ ref }: { ref?: string }) {
           email,
           name,
           why,
-          ...(ref ? { referralCode: ref } : {}),
+          ...(refCode ? { referralCode: refCode } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
