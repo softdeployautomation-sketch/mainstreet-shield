@@ -76,7 +76,9 @@ jobs:
             # Install dependencies on VPS (include devDeps for tailwindcss build)
             npm ci
             # Load environment variables for prisma generate + build
-            export $(cat .env | xargs)
+            set -a
+            source .env
+            set +a
             # Build Next.js app for production
             npx prisma generate
             npm run build
