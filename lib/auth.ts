@@ -20,7 +20,7 @@ export async function getSession(): Promise<Session | null> {
   if (!token) return null;
 
   try {
-    const { payload } = await jwtVerify(token, SESSION_SECRET);
+    const { payload } = await jwtVerify(token, getSessionSecret());
     return {
       userId: payload.userId as string,
       email: payload.email as string,
@@ -47,7 +47,7 @@ export async function createSession(user: {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(SESSION_SECRET);
+    .sign(getSessionSecret());
 
   const cookieStore = await cookies();
   cookieStore.set("shield-session", token, {

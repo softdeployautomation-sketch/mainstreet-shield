@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { jwtVerify } from "jose";
-import { SESSION_SECRET } from "@/lib/session-secret";
+import { getSessionSecret } from "@/lib/session-secret";
 
 async function getSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get("shield-session")?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, SESSION_SECRET);
+    const { payload } = await jwtVerify(token, getSessionSecret());
     return payload as { userId: string; email: string; role: string; tier: string };
   } catch {
     return null;

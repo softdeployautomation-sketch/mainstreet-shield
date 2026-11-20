@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { createSession, hashPassword } from "@/lib/auth";
-import { SESSION_SECRET } from "@/lib/session-secret";
+import { getSessionSecret } from "@/lib/session-secret";
 import {
   validateReferral,
   attributeReferral,
@@ -234,7 +234,7 @@ export async function GET() {
   }
   try {
     const { jwtVerify } = await import("jose");
-    const { payload } = await jwtVerify(token, SESSION_SECRET);
+    const { payload } = await jwtVerify(token, getSessionSecret());
     return NextResponse.json({
       userId: payload.userId as string,
       email: payload.email as string,

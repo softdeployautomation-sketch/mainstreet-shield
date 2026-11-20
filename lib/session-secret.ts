@@ -3,16 +3,19 @@
 //   - At runtime in production, any session operation without SESSION_SECRET
 //     throws immediately — preventing forgeable session cookies.
 //   - Local dev keeps the dev-secret fallback so next dev works out of the box.
-const _rawSecret = process.env.SESSION_SECRET;
+let _cachedSecret: Uint8Array | null = null;
 
-function getSessionSecret(): Uint8Array {
-  if (!_rawSecret) {
+export function getSessionSecret(): Uint8Array {
+  if (_cachedSecret) return _cachedSecret;
+
+  const raw = process.env.SESSION_SECRET;
+  if (!raw) {
     if (process.env.NODE_ENV === "production") {
       throw new Error("SESSION_SECRET must be set in production");
     }
-    return new TextEncoder().encode("dev-secret-change-me");
+    _cachedSecret = new TextEncoder().encode("dev-secret-change-me");
+    return _cachedSecret;
   }
-  return new TextEncoder().encode(_rawSecret);
+  _cachedSecret = new TextEncoder().encode(raw);
+  return _cachedSecret;
 }
-
-export const SESSION_SECRET = getSessionSecret();
