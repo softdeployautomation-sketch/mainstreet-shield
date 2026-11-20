@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getUserReferralLink } from "@/lib/referral";
 import CopyButton from "@/components/CopyButton";
 import { DeleteAccountForm } from "@/components/delete-account-form";
+import { ClineSettingsCard } from "@/components/cline-settings-card";
 
 export const dynamic = "force-dynamic";
 
@@ -138,6 +139,17 @@ export default async function SettingsPage({ searchParams }: { searchParams: { [
         <div className="mt-8 rounded-xl border border-border bg-bg-elevated p-6">
           <DeleteAccountForm userId={user.id} />
         </div>
+
+        {/* S2-8: Cline agent settings (Tier 3+) */}
+        {user.tier >= "3" && (
+          <div className="mt-8 rounded-xl border border-border bg-bg-elevated p-6">
+            <h2 className="text-lg font-display font-bold mb-4">Cline Agent Settings</h2>
+            <p className="text-sm text-fg-muted mb-4">
+              Configure your Cline API key to use the MSS Agent. Tier 3+ required.
+            </p>
+            <ClineSettingsCard settings={null} />
+          </div>
+        )}
       </section>
     </div>
   );

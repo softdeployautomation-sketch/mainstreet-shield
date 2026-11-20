@@ -34,6 +34,7 @@ model User {
   workflows         Workflow[]
   contextDocSteps   ContextDocStep[]
   mssAgentSessions  MssAgentSession[]
+  userSettings      UserSettings?
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +250,19 @@ model ContextDocStep {
   stepType  String   // e.g. "CLINE_VM_COMMAND_APPROVAL", "CLINE_VM_SESSION_START", "CLINE_VM_SESSION_END"
   content   String
   createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Per-user settings — Cline agent API key + model + endpoint (S2-8)
+// ---------------------------------------------------------------------------
+model UserSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  clineApiKeyEnc  String?  // AES-GCM encrypted Cline API key
+  clineModelId    String?
+  clineApiEndpoint String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
