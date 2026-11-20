@@ -120,7 +120,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: { [
                 <input
                   name="password"
                   type="password"
-                  minLength="12"
+                  minLength={12}
                   required
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
                 />
