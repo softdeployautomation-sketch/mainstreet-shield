@@ -3,14 +3,23 @@ import { getSession, requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 // GET /api/admin/users — list all users (admin only)
+// SpaceWorker admin proxy sends X-Service-Token header for server-to-server auth
 export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const serviceToken = req.headers.get("X-Service-Token");
+  if (
+    serviceToken &&
+    serviceToken === process.env.MAINSTREET_SERVICE_TOKEN
+  ) {
+    // bypass session check — trusted SpaceWorker admin proxy
+  } else {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+    await requireAdmin(session).catch(() =>
+      NextResponse.json({ error: "forbidden" }, { status: 403 })
+    );
   }
-  await requireAdmin(session).catch(() =>
-    NextResponse.json({ error: "forbidden" }, { status: 403 })
-  );
 
   const { searchParams } = new URL(req.url);
   const tier = searchParams.get("tier");
@@ -43,14 +52,23 @@ export async function GET(req: Request) {
 }
 
 // PATCH /api/admin/users/[id]/tier — update a user's access tier (admin only)
+// SpaceWorker admin proxy sends X-Service-Token header for server-to-server auth
 export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const serviceToken = req.headers.get("X-Service-Token");
+  if (
+    serviceToken &&
+    serviceToken === process.env.MAINSTREET_SERVICE_TOKEN
+  ) {
+    // bypass session check — trusted SpaceWorker admin proxy
+  } else {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+    await requireAdmin(session).catch(() =>
+      NextResponse.json({ error: "forbidden" }, { status: 403 })
+    );
   }
-  await requireAdmin(session).catch(() =>
-    NextResponse.json({ error: "forbidden" }, { status: 403 })
-  );
 
   const { userId, tier } = await req.json();
 

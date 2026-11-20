@@ -21,10 +21,19 @@ async function getSession() {
 
 // POST /api/admin/tier — change a user's access tier (admin only)
 // Body: { userId: string, tier: "1" | "3" | "5" }
+// Accepts X-Service-Token header for server-to-server auth from SpaceWorker admin
 export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "admin required" }, { status: 403 });
+  const serviceToken = req.headers.get("X-Service-Token");
+  if (
+    serviceToken &&
+    serviceToken === process.env.MAINSTREET_SERVICE_TOKEN
+  ) {
+    // bypass session check — trusted SpaceWorker admin proxy
+  } else {
+    const session = await getSession();
+    if (!session || session.role !== "admin") {
+      return NextResponse.json({ error: "admin required" }, { status: 403 });
+    }
   }
 
   const body = await req.json();
@@ -48,10 +57,18 @@ export async function POST(req: Request) {
 }
 
 // GET /api/admin/tier — list all users with their tiers (admin only)
-export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "admin required" }, { status: 403 });
+export async function GET(req: Request) {
+  const serviceToken = req.headers.get("X-Service-Token");
+  if (
+    serviceToken &&
+    serviceToken === process.env.MAINSTREET_SERVICE_TOKEN
+  ) {
+    // bypass session check — trusted SpaceWorker admin proxy
+  } else {
+    const session = await getSession();
+    if (!session || session.role !== "admin") {
+      return NextResponse.json({ error: "admin required" }, { status: 403 });
+    }
   }
 
   const users = await db.user.findMany({
