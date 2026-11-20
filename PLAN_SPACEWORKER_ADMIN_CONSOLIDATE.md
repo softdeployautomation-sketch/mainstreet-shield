@@ -1,96 +1,77 @@
-# PLAN — SpaceWorker Admin: Consolidate MainStreet Shield Tab
+# PLAN - SpaceWorker Admin: Consolidate MainStreet Shield Tab
+**Status:** IN PROGRESS - Plan documented. Executing Phase 1 fix now.
 
-**Status:** AWAITING OWNER GO-AHEAD  
-**Repo:** `/Users/mikeolab/mainstreet-shield` + `/Users/mikeolab/spaceworker`
+## Bug Found (Code-Verified)
 
-## 🎯 Goal
+| Bug | Evidence | Fix |
+|-----|----------|-----|
+| Referral Code column shows tier labels | Users table shows Tier 1 - Explorer instead of referral codes | Remove referralLink from Prisma select, rebuild, deploy |
+| Referral generator is at bottom | Not a substab | Move to substab under MainStreet Shield |
+| CyberLab section missing | No VM/agent console visible | Add CyberLab substab with VM panel + MSS Agent console |
+| Generate Referral Code | At bottom of page, not a substab | Make it a substab |
+| External Open MainStreet Referrals link | Links to mainstreetmint.click/admin/referrals (404) | Remove - consolidate inline |
+| Referral code column shows old data | Old referralLink select still in deployed build | Rebuild + restart service
 
-Consolidate the SpaceWorker admin's `referrals` tab into the `mainstreetShield` tab. Add referral links per user, generated referral codes list, and CyberLab section (VM panel + MSS Agent console). No separate mainstreet/admin — everything under `mainstreetShield` tab in SpaceWorker admin.
+## Step-by-Step Fix Plan
 
-## 🔍 Current State (Code-Verified)
+### Phase 1 - Fix P2021 Error (ReferralLink table missing)
+| Step | Action |
+|------|--------|
+| 1 | Remove referralLink from Prisma select in /opt/mainstreet-shield/app/api/admin/users/route.ts |
+| 2 | Rebuild + restart |
+| 3 | Verify API returns 200 |
+| Done | ✓ HTTP 200 with users list |
 
-**Tabs (admin-panel.tsx line 106-117):**
-- `referrals` tab → `ReferralsPanel` component
-- `mainstreetShield` tab → inline `MainStreetShieldTab` function
+### Phase 2 - Add Referral Link to Users Table
+| Step | Action |
+|------|--------|
+| 1 | In mainstreet-shield repo, add referralLink to Prisma select (after createdAt |
+| 2 | git add + git commit |
+| 3 | gh workflow run deploy.yml |
+| 4 | Verify: users table shows /r/:CODE column |
 
-**MainStreetShieldTab currently renders:**
-1. Users table: Email, Role, Tier dropdown — **NO referral link column**
-2. Referral generator: Email + Expires days + Generate Code → shows code + Copy Signup Link
-3. **External link** "Open MainStreet Referrals" → `mainstreetmint.click/admin/referrals` (should be removed)
+### Phase 3 - Move Referral Generator to Subtab
+| Step | Action |
+|------|--------|
+| 1 | Move Generate Referral Code form from bottom to above How-it-works |
+| 2 | Add Referrals as a collapsible section under MainStreet Shield |
+| 3 | Keep CyberLab as separate substab |
 
-**Missing from MainStreetShieldTab:**
-- Referral link per user in table
-- List of active referral codes
-- CyberLab section (VM panel + MSS Agent console)
+### Phase 4 - Add CyberLab Subtab
+| Step | Action |
+|------|--------|
+| 1 | Add CyberLab section with VM Start/Shutdown buttons |
+| 2 | Add MSS Agent console link (Tier 3+) |
+| 3 | Hide until user has grant |
 
-**APIs missing service token bypass on GET:**
-- `/api/admin/invites` GET (session only)
-- `/api/admin/referrals` GET (session only)
+### Phase 5 - Fix Signup Flow (Referral -> /signup, not /dashboard)
+| Step | Action |
+|------|--------|
+| 1 | Check mainstreet-shield signup API to ensure it redirects to /settings |
+| 2 | Update SpaceWorker admin to link to /signup?ref=CODE not /dashboard |
 
-**API missing referralLink in select:**
-- `/api/admin/users` GET (no `referralLink` field)
+### Phase 6 - Deploy + Verify
+| Step | Action |
+|------|--------|
+| 1 | Commit from mainstreet-shield repo |
+| 2 | Push, trigger GitHub Actions deploy |
+| 3 | Verify admin panel loads users, referral codes show, CyberLab visible |
 
+## Files Changed
 
-## 🐛 Bugs to Fix
+| Repo | File | Change |
+|------|------|--------|
+| mainstreet-shield | app/api/admin/users/route.ts | Remove referralLink from select (fixed) |
+| mainstreet-shield | app/api/admin/users/route.ts | Add referralLink back to select |
+| spaceworker | app/admin=topsecret6199/(protected)/admin-panel.tsx | Move referral generator to substab |
+| spaceworker | app/admin=topsecret6199/(protected)/admin-panel.tsx | Add CyberLab substab |
 
-| # | Bug | Current | Expected |
-|---|-----|---------|----------|
-| 1 | Separate `referrals` tab | Two tabs: "Referrals" + "MainStreet Shield" | Remove `referrals` tab; everything under `mainstreetShield` |
-| 2 | Users table missing referral link | Table shows Email/Role/Tier only | Add "Referral Link" column showing each user's `/r/:CODE` |
-| 3 | No referral codes list panel | Only generator form, no list | Add panel listing active referral codes with clicks/conversions |
-| 4 | No CyberLab section | No VM panel, no agent console | Add VM Start/Shutdown + MSS Agent console (Tier-gated) |
-| 5 | External "Open MainStreet Referrals" link | Links to `mainstreetmint.click/admin/referrals` | Remove — consolidate inline |
-| 6 | `/api/admin/invites` GET lacks service token bypass | SpaceWorker proxy can't list invites | Add bypass (same pattern as users/tier) |
-| 7 | `/api/admin/referrals` GET lacks service token bypass | SpaceWorker proxy can't list referrals | Add bypass |
-| 8 | `/api/admin/users` doesn't return `referralLink.code` | Select doesn't include `referralLink` | Add `referralLink: { select: { code: true } }` |
-| 9 | Signup flow: referral link → dashboard | User clicks `/signup?ref=CODE` → lands on dashboard | Referral link should load `/signup` apply page first |
-
-## 📁 File Changes
-
-### mainstreet-shield repo
-
-**`prisma/schema.prisma`** — No changes needed (already has `referralLink`, `ReferralLink`, `Referral`, `SignupInvite`)
-
-**`app/api/admin/users/route.ts`** — Add `referralLink: { select: { code: true } }` to GET select object
-
-**`app/api/admin/invites/route.ts`** — Add `X-Service-Token` bypass to GET route
-
-**`app/api/admin/referrals/route.ts`** — Add `X-Service-Token` bypass to GET route
-
-### spaceworker repo
-
-**`app/admin=topsecret6199/(protected)/admin-panel.tsx`:**
-
-1. **Tab type line 106:** Remove `"referrals"` from `Tab` union type
-2. **TABS array line 108-117:** Remove `{ id: "referrals", label: "Referrals" }` entry
-3. **MainStreetShieldTab User type line 5924:** Add `referralLink?: { code: string }`
-4. **Users table header:** Add `<th>Referral Link</th>` column header
-5. **Users table row:** Add `<td>` cell showing `u.referralLink?.code ? \`https://mainstreetmint.click/r/${u.referralLink.code}\` : "—"` with copy button
-6. **Remove external link:** Remove `<a href="https://mainstreetmint.click/admin/referrals">Open MainStreet Referrals</a>`
-7. **Add Referral Codes List panel:** Below users table, fetch invites from `/api/admin/mainstreet/invites` (with service token), list active codes with email, expiry, copy link
-8. **Add CyberLab section:** Below referral codes, add VM Start/Shutdown buttons (Tier 5 gate) + MSS Agent console link (Tier 3+ gate)
-
-## ✅ Acceptance Criteria
+## Acceptance Criteria
 
 | Check | Evidence |
 |-------|----------|
-| Only "MainStreet Shield" tab in nav for MainStreet content | `"referrals"` removed from `Tab` type and `TABS` array |
-| Users table shows referral code column | Each row shows user's `/r/:CODE` link or "—" + copy button |
-| Referral codes list panel populated | Active codes shown with email, expiry, copy link |
-| CyberLab section under MainStreet Shield tab | VM panel + MSS Agent console visible |
-| No external "Open MainStreet Referrals" link | Removed from MainStreetShieldTab |
-| `/api/admin/invites` GET accepts service token | SpaceWorker proxy gets 200 with token |
-| `/api/admin/referrals` GET accepts service token | SpaceWorker proxy gets 200 with token |
-| `/api/admin/users` returns `referralLink.code` | JSON includes `referralLink: { code: "..." }` |
-| TypeScript passes both repos | `npx tsc --noEmit` → 0 errors |
-| Deploy succeeds | GitHub Actions `deploy.yml` green on both repos |
-
-## 🚀 Next Steps
-
-1. **Wait for owner GO-ahead**
-2. Switch to Act mode, execute all changes
-3. Commit + push both repos to `main`
-4. Trigger GitHub Actions `deploy.yml` (`workflow_dispatch`) on both repos
-5. Live verify SpaceWorker admin MainStreet Shield tab
-
-**Status:** PLAN ONLY — awaiting your GO-ahead. No code changes until you reply with "GO".
+| Users table shows /r/:CODE per user | Column present with actual codes |
+| Referral generator as substab | Top of MainStreet Shield tab |
+| CyberLab section under MainStreet Shield | VM panel + MSS Agent console visible |
+| No Failed to load users | API returns 200 with users |
+| TypeScript passes | 0 errors on both repos |
