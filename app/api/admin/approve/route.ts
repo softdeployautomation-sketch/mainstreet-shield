@@ -2,10 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
-
-const SESSION_SECRET = new TextEncoder().encode(
-  process.env.SESSION_SECRET || "dev-secret-change-me"
-);
+import { SESSION_SECRET } from "@/lib/auth";
 
 async function getSession() {
   const cookieStore = await cookies();
