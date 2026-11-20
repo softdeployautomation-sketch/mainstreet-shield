@@ -95,6 +95,40 @@ Files changed (8): .env.example, app/api/settings/cline/route.ts, app/settings/p
 - No secrets committed or printed. `.env.example` unchanged (still documents SESSION_SECRET).
 - Next: await SVE Phase A local checks, then owner deploy + Phase B live verification vs https://mainstreetmint.click (AC-1…AC-8).
 
+
+## Phase: S2-9 Cline Login Flow + Agent UI + Workflow Files (DONE)
+Spec: task/TASK_258_S2_9_AGENT_UI_WORKFLOW.md
+Branch: task-258-s2-9-cline-login-agent-workflow (from main, commit 55a1f64, not pushed)
+Commit: (to be created) — "S2-9: Cline login flow + agent UI + workflow files"
+Files changed (16 spec files + app/shield/page.tsx render wiring + task docs):
+1. EDIT prisma/schema.prisma — added `ClineAuthSession` model (owner approval; NOT migrated)
+2. EDIT .env.example — added `CLINE_OAUTH_CLIENT_ID`, `CLINE_OAUTH_CLIENT_SECRET` placeholders
+3. NEW lib/clin/token-store.ts — auto-encrypt OAuth token at rest + session helpers
+4. NEW app/api/clin/auth/me/route.ts — GET auth status (session-gated)
+5. NEW app/api/clin/auth/connect/route.ts — POST start device code flow (SDK startClineDeviceAuth)
+6. NEW app/api/clin/auth/poll/route.ts — POST poll device code completion → saveClineOAuthToken
+7. NEW app/api/clin/auth/logout/route.ts — POST clear ClineAuthSession
+8. NEW app/api/clin/auth/free-models/route.ts — GET free Cline models
+9. NEW app/api/mss/agent/chat/route.ts — POST chat + reasoning trace (works without VM)
+10. NEW app/api/mss/agent/workflow/route.ts — POST generate workflow JSON with systemPrompt
+11. NEW lib/mss-agent-verification.ts — ClineCore instantiation, tools, SSH tool
+12. NEW components/cline-login-modal.tsx — device code modal (authkit.cline.bot/device)
+13. EDIT components/cline-settings-card.tsx — status row, login/logout, modal, free models dropdown
+14. NEW components/agent-chat.tsx — client chat UI in Lab Console (/shield)
+15. NEW components/workflow-builder.tsx — workflow file UI with embedded systemPrompt
+16. EDIT app/shield/page.tsx — render AgentChat + WorkflowBuilder in MSS Agent Access (Tier 3+)
+- `npx tsc --noEmit` = 0 ✔
+- `npx prisma validate` passes ✔ (schema change NOT applied — owner must run prisma migrate)
+- No secrets committed (.env.example placeholders only; .env gitignored)
+- `prisma generate` ran to regenerate client with ClineAuthSession (NOT migrate/push)
+- Login button shows on Settings page for Tier 3+ (Disconnected state)
+- Device code modal: authkit.cline.bot/device + user code + countdown + Check now
+- After auth: status Connected with email; Log out / Switch account when connected
+- Agent chat returns response + reasoning trace
+- Workflow file includes systemPrompt for another agent to update it
+- SDK verification: ClineCore instantiates, tools listed, SSH available
+- Rollback: revert all changed files; remove ClineAuthSession model from schema; no data migration (new table only)
+
 ## Hard rules (unchanged)
 - NO DEPLOY (owner dispatches via GitHub Actions `workflow_dispatch`)
 - NO `git push` to `main`/shared branches (Task Agent commits on branches only)

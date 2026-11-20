@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ShieldVmPanel } from "@/components/shield-vm-panel";
+import { AgentChat } from "@/components/agent-chat";
+import { WorkflowBuilder } from "@/components/workflow-builder";
 
 export const dynamic = "force-dynamic";
 
@@ -97,10 +99,19 @@ export default async function ShieldPage() {
                   guided security testing. Human approval required for
                   destructive commands.
                 </p>
-                <div className="text-sm text-fg-muted space-y-1">
-                  <p>• VM must be running (start it above)</p>
+                <div className="text-sm text-fg-muted space-y-1 mb-4">
+                  <p>• Chat and workflows work without a VM</p>
+                  <p>• VM only needed for actions that target your lab VM</p>
                   <p>• Destructive commands require explicit human approval</p>
                   <p>• All actions are audited via MssAgentSession + ContextDocStep</p>
+                </div>
+
+                <div className="rounded border border-border bg-bg-elevated p-4">
+                  <AgentChat />
+                </div>
+
+                <div className="mt-6 rounded border border-border bg-bg-elevated p-4">
+                  <WorkflowBuilder />
                 </div>
               </div>
             )}

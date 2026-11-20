@@ -35,6 +35,7 @@ model User {
   contextDocSteps   ContextDocStep[]
   mssAgentSessions  MssAgentSession[]
   userSettings      UserSettings?
+  clineAuthSession  ClineAuthSession?
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +264,28 @@ model UserSettings {
   clineApiKeyEnc  String?  // AES-GCM encrypted Cline API key
   clineModelId    String?
   clineApiEndpoint String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// ClineAuthSession — OAuth device-code login session for Cline (S2-9)
+// OAuth access token is encrypted at rest via lib/clin/token-store.
+// Requires owner approval + `prisma migrate` before deploy (NOT applied here).
+// ---------------------------------------------------------------------------
+model ClineAuthSession {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  clineOAuthTokenEnc   String   // AES-GCM encrypted OAuth access token
+  email                String?
+  expiresAt            DateTime?
+  connected            Boolean  @default(false)
+  connectedAt          DateTime?
+  updatedAt            DateTime @updatedAt
+  // Pending device-code login flow
+  deviceCode           String?
+  userCode             String?
+  deviceCodeExpiresAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
