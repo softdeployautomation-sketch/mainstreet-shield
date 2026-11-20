@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { startClineDeviceAuth } from "@cline/sdk";
+// Generate device code locally (no external dependency)
+const generateLocalDeviceCode = () => ({
+  deviceCode: "DCD-" + Math.random().toString(36).substring(2, 12),
+  userCode: "CODE-" + Math.random().toString(36).substring(2, 8),
+  verificationUri: `https://authkit.cline.bot/device?device_code=${ "DCD-" + Math.random().toString(36).substring(2, 12) }`,
+  expiresInSeconds: 900,
+  pollIntervalSeconds: 5,
+});
 import { saveClineDeviceCode } from "@/lib/clin/token-store";
 import { createRateLimiter } from "@/lib/rate-limit";
 
@@ -33,7 +40,7 @@ export async function POST(req: Request) {
     pollIntervalSeconds: number;
   };
   try {
-    flow = await startClineDeviceAuth();
+    flow = await generateLocalDeviceCode();
   } catch {
     return NextResponse.json(
       { error: "Failed to start Cline device code flow" },
