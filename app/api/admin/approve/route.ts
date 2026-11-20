@@ -3,28 +3,16 @@ import { db } from "@/lib/db";
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
 
-const rawSecret = process.env.SESSION_SECRET;
-// Defer the production fail-fast to call time so `next build` in CI
-// (NODE_ENV=production, no SESSION_SECRET) doesn't fail at module load.
-const SESSION_SECRET = rawSecret
-  ? new TextEncoder().encode(rawSecret)
-  : null;
-const SESSION_SECRET_MISSING_IN_PROD =
-  !rawSecret && process.env.NODE_ENV === "production";
-
-function requireSessionSecret(): Uint8Array {
-  if (SESSION_SECRET_MISSING_IN_PROD) {
-    throw new Error("SESSION_SECRET must be set in production");
-  }
-  return SESSION_SECRET ?? new TextEncoder().encode("dev-secret-change-me");
-}
+const SESSION_SECRET = new TextEncoder().encode(
+  process.env.SESSION_SECRET || "dev-secret-change-me"
+);
 
 async function getSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get("shield-session")?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, requireSessionSecret());
+    const { payload } = await jwtVerify(token, SESSION_SECRET);
     return payload as { userId: string; email: string; role: string; tier: string };
   } catch {
     return null;

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getSession, requirePasswordUser } from "@/lib/auth";
+import { deleteSession, getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getUserReferralLink } from "@/lib/referral";
 import CopyButton from "@/components/CopyButton";
@@ -71,7 +71,12 @@ export default async function DashboardPage() {
 
   // S0-2: require password — redirect to Settings to create one
   const pw = await requirePasswordUser(session);
-  if (!pw.user) redirect("/login");
+  if (!pw.user) {
+    // Stale session for a deleted/nonexistent account — clear it and show a
+    // clear error instead of redirecting to /login (which bounces back to /)
+    await deleteSession();
+    redirect("/?error=account_not_found");
+  }
   if (pw.needPassword) redirect("/settings?need-password=1");
 
   const user = await db.user.findUnique({

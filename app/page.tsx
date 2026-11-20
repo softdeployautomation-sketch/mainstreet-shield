@@ -14,7 +14,15 @@ const NAV = [
   { label: "Request access", href: "#request-access" },
 ];
 
-export default function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const resolvedParams = await searchParams;
+  const error = Array.isArray(resolvedParams.error)
+    ? resolvedParams.error[0]
+    : resolvedParams.error;
   return (
     <div className="min-h-screen bg-bg text-fg selection:bg-brand-200 selection:text-fg">
       <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur">

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
-import { createSession, hashPassword } from "@/lib/auth";
+import { createSession, hashPassword, SESSION_SECRET } from "@/lib/auth";
 import {
   validateReferral,
   attributeReferral,
@@ -12,22 +12,6 @@ import {
 import { createRateLimiter } from "@/lib/rate-limit";
 
 const signupRateLimit = createRateLimiter(15 * 60 * 1000, 3);
-
-const rawSecret = process.env.SESSION_SECRET;
-// Defer the production fail-fast to call time so `next build` in CI
-// (NODE_ENV=production, no SESSION_SECRET) doesn't fail at module load.
-const SESSION_SECRET = rawSecret
-  ? new TextEncoder().encode(rawSecret)
-  : null;
-const SESSION_SECRET_MISSING_IN_PROD =
-  !rawSecret && process.env.NODE_ENV === "production";
-
-function requireSessionSecret(): Uint8Array {
-  if (SESSION_SECRET_MISSING_IN_PROD) {
-    throw new Error("SESSION_SECRET must be set in production");
-  }
-  return SESSION_SECRET ?? new TextEncoder().encode("dev-secret-change-me");
-}
 
 export async function POST(req: Request) {
   try {
@@ -249,7 +233,7 @@ export async function GET() {
   }
   try {
     const { jwtVerify } = await import("jose");
-    const { payload } = await jwtVerify(token, requireSessionSecret());
+    const { payload } = await jwtVerify(token, SESSION_SECRET);
     return NextResponse.json({
       userId: payload.userId as string,
       email: payload.email as string,
