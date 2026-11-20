@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { jwtVerify, SignJWT } from "jose";
 import bcrypt from "bcrypt";
 import { db } from "./db";
-import { SESSION_SECRET } from "./session-secret";
+import { getSessionSecret } from "./session-secret";
 
 export interface Session {
   userId: string;
