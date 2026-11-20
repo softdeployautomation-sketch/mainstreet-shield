@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 
 interface Referral {
   id: string;
@@ -110,12 +111,20 @@ export default function ClientReferralsPage() {
             Admin referral codes for MainStreet Shield signups
           </p>
         </div>
-        <button
-          onClick={generateCode}
-          className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          + Generate Code
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={generateCode}
+            className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          >
+            + Generate Code
+          </button>
+          <Link
+            href="/admin/referrals/users"
+            className="rounded bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 hover:text-white border border-zinc-700"
+          >
+            View Users
+          </Link>
+        </div>
       </div>
 
       <div className="overflow-x-auto">

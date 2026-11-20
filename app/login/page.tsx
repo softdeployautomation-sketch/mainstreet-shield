@@ -3,13 +3,38 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { createSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { hasAccessGate } from "@/lib/referral";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
+const REFERRAL_COOKIE = "sw_ref";
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const cookieStore = await cookies();
   const token = cookieStore.get("shield-session")?.value;
   if (token) redirect("/dashboard");
+
+  const resolvedParams = await searchParams;
+  const refCookie = cookieStore.get(REFERRAL_COOKIE)?.value;
+  const refQuery = Array.isArray(resolvedParams.ref)
+    ? resolvedParams.ref[0]
+    : resolvedParams.ref;
+
+  // Referral gate: need valid sw_ref cookie or ?ref=CODE to see login form
+  let hasAccess = refCookie ? await hasAccessGate(refCookie) : false;
+
+  if (!hasAccess && refQuery) {
+    hasAccess = await hasAccessGate(refQuery);
+    if (!hasAccess) redirect("/?error=referral_required");
+  }
+
+  if (!hasAccess) {
+    redirect("/?error=referral_required");
+  }
 
   return (
     <div className="min-h-screen bg-bg text-fg flex flex-col">
@@ -32,7 +57,7 @@ export default async function LoginPage() {
           </div>
           <p className="text-fg-muted text-sm md:text-base mb-8 leading-relaxed">
             Enter your email to sign in. No password required — sign-in is via
-            referral link only. Check your email for your access link.
+            referral link only.
           </p>
 
           <form action="/api/auth/login" method="POST" className="space-y-6">
@@ -57,7 +82,7 @@ export default async function LoginPage() {
 
           <p className="mt-6 text-xs font-mono text-fg-muted text-center">
             Don't have an account?{" "}
-            <Link href="/signup?ref=NEW" className="text-brand-600 hover:text-brand-500 underline">
+            <Link href="/signup" className="text-brand-600 hover:text-brand-500 underline">
               Apply for access
             </Link>
           </p>

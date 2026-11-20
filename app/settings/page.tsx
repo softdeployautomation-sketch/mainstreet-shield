@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getUserReferralLink } from "@/lib/referral";
 
 export const dynamic = "force-dynamic";
 
@@ -28,15 +29,8 @@ export default async function SettingsPage() {
     "5": "Full access - can create VMs, run agents, manage company assets and workflows.",
   };
 
-  const referral = await db.referral.findFirst({
-    where: {
-      OR: [
-        { referrerId: session.userId },
-        { referredId: session.userId },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // Get the user's own referral link (like SpaceWorker getUserReferralLink)
+  const referralLink = await getUserReferralLink(session.userId);
 
   return (
     <div className="min-h-screen bg-bg text-fg flex flex-col">
@@ -93,30 +87,22 @@ export default async function SettingsPage() {
               <dt className="text-fg-muted">Member since</dt>
               <dd className="font-mono text-xs">{new Date(user.createdAt).toLocaleDateString()}</dd>
             </div>
-            {referral && (
-              <>
-                <div className="flex justify-between">
-                  <dt className="text-fg-muted">Referral code</dt>
-                  <dd className="font-mono">{referral.code}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-fg-muted">Referred by</dt>
-                  <dd className="font-mono">{referral.referrerId || referral?.referrerId || ""}</dd>
-                </div>
-              </>
-            )}
+            <div className="flex justify-between">
+              <dt className="text-fg-muted">Your referral code</dt>
+              <dd className="font-mono">{referralLink.code}</dd>
+            </div>
             <div className="flex justify-between">
               <dt className="text-fg-muted">Copy referral link</dt>
-              <dd className="font-mono text-xs text-emerald-400">
+              <dd className="font-mono text-xs text-brand-600 dark:text-brand-400">
                 <button
                   type="button"
                   onClick={() => {
-                    const link = `${window.location.origin}/signup?ref=${referral?.code || ""}`;
+                    const link = `${window.location.origin}/r/${referralLink.code}`;
                     navigator.clipboard.writeText(link);
                   }}
                   className="hover:underline cursor-pointer"
                 >
-                  {referral?.code || "No referral yet"}
+                  {referralLink.code}
                 </button>
               </dd>
             </div>

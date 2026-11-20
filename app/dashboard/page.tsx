@@ -285,7 +285,7 @@ export default async function DashboardPage() {
               </Link>
             </div>
             <p className="text-sm text-fg-muted mb-4">
-              Control your Linux lab VM, access noVNC desktop, and run Cline agent bug-hunting sessions.
+              Control your Linux lab VM, access noVNC desktop, and run MSS Agent bug-hunting sessions.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-lg border border-border p-4">

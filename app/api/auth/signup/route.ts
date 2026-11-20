@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { createSession } from "@/lib/auth";
+import { validateReferral, attributeReferral, getUserReferralLink } from "@/lib/referral";
 
 const SESSION_SECRET = new TextEncoder().encode(
   process.env.SESSION_SECRET || "dev-secret-change-me"
@@ -51,20 +52,33 @@ export async function POST(req: Request) {
       },
     });
 
-    let referralUpdated = false;
+    let referralLink: { id: string; code: string } | null = null;
+
     if (referralCode) {
-      const result = await db.referral.updateMany({
+      const link = await validateReferral(referralCode);
+      if (!link) {
+        return NextResponse.json(
+          { error: "Invalid or already used referral code" },
+          { status: 400 }
+        );
+      }
+
+      // Attribute the user to the referrer's link (like SpaceWorker attributeReferral)
+      await attributeReferral({
+        userId: user.id,
+        linkId: link.id,
+        referrerCode: link.code,
+        referrerEmail: "",
+      });
+
+      // Also mark the old Referral model as claimed for backward compat
+      await db.referral.updateMany({
         where: { code: referralCode, status: "pending" },
         data: { status: "claimed", referredId: user.id },
       });
-      referralUpdated = result.count > 0;
-    }
 
-    if (referralCode && !referralUpdated) {
-      return NextResponse.json(
-        { error: "Invalid or already used referral code" },
-        { status: 400 }
-      );
+      // Auto-create the new user's own referral link (like SpaceWorker)
+      referralLink = await getUserReferralLink(user.id);
     }
 
     await db.pendingSignup.upsert({
@@ -95,12 +109,26 @@ export async function POST(req: Request) {
       tier: user.tier,
     });
 
-    const redirectTo = referralCode
-      ? "/settings?ref=" + encodeURIComponent(referralCode)
-      : "/settings";
-    return NextResponse.redirect(new URL(redirectTo, req.url), {
-      status: 303,
-    });
+    // Return JSON 201 (SpaceWorker model) — frontend handles redirect
+    const redirectTo = referralCode ? `/settings?ref=${encodeURIComponent(referralCode)}` : "/settings";
+    return NextResponse.json(
+      {
+        ok: true,
+        userId: user.id,
+        tier: user.tier,
+        referralLink: referralLink ? `/r/${referralLink.code}` : null,
+        redirectTo,
+        message: "Account created. You have Tier 1 access — explore the lab tools.",
+      },
+      {
+        status: 201,
+        headers: {
+          "Set-Cookie": `shield-session=${token}; Path=/; Max-Age=604800; SameSite=Lax${
+            process.env.NODE_ENV === "production" ? "; Secure; HttpOnly" : ""
+          }`,
+        },
+      }
+    );
   } catch (err) {
     console.error("Signup error:", err);
     return NextResponse.json({ error: "signup failed" }, { status: 500 });

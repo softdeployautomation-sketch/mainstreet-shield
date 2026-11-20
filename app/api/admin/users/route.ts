@@ -41,3 +41,38 @@ export async function GET(req: Request) {
 
   return NextResponse.json({ users });
 }
+
+// PATCH /api/admin/users/[id]/tier — update a user's access tier (admin only)
+export async function PATCH(req: Request) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+  await requireAdmin(session).catch(() =>
+    NextResponse.json({ error: "forbidden" }, { status: 403 })
+  );
+
+  const { userId, tier } = await req.json();
+
+  if (!userId || !tier) {
+    return NextResponse.json(
+      { error: "userId and tier are required" },
+      { status: 400 }
+    );
+  }
+
+  if (!["1", "3", "5"].includes(tier)) {
+    return NextResponse.json(
+      { error: "tier must be 1, 3, or 5" },
+      { status: 400 }
+    );
+  }
+
+  const user = await db.user.update({
+    where: { id: userId },
+    data: { tier },
+    select: { id: true, email: true, tier: true },
+  });
+
+  return NextResponse.json({ ok: true, user });
+}

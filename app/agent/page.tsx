@@ -31,7 +31,7 @@ export default async function AgentPage() {
           <span className="text-emerald-400 font-mono text-sm">›_</span>
           <h1 className="text-xl font-semibold">Agent</h1>
           <p className="text-xs text-zinc-400 mt-1">
-            Cline agent — assist or full-control bug hunting
+            MSS Agent — assist or full-control bug hunting
           </p>
         </div>
       </div>

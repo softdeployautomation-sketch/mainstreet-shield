@@ -98,4 +98,4 @@
 | Phase 3 | PENDING | — | — |
 | Phase 4 | COMPLETE | — | Redesign dashboard: Dashboard | Assets | Workflows | Lab Console | Settings tabs |
 | Phase 5 | COMPLETE | — | Remove cyberlab from spaceworker admin |
-| Phase 6 | IN PROGRESS | — | Commit, push, deploy + verify |
+| Phase 6 | COMPLETE | — | mainstreet-shield ✅ committed/pushed/deployed; spaceworker ✅ committed/pushed/deployed (VantraLinkRow type fixed) |

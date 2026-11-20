@@ -4,11 +4,12 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 
 // ---------------------------------------------------------------------------
-// Cline agent → Shield Linux VM session management
+// MSS Agent → Shield Linux VM session management
 // Full VNC + SSH access to the VM, under human tool-approval gate.
+// Powered by Cline SDK internally; UI says "MSS Agent" — never "Cline".
 // ---------------------------------------------------------------------------
 
-export interface ClineVmSession {
+export interface MssAgentSession {
   id: string;
   userId: string;
   vmId: string;
@@ -17,7 +18,7 @@ export interface ClineVmSession {
   sshUser: string;
   sshKeyPath: string;
   vncPassword?: string;      // random per-session, never logged to stdout
-  clineToken: string;        // cline always-access token
+  mssToken: string;          // mss always-access token
   approvedCommands: string[]; // commands the human has approved this session
   createdAt: Date;
   expiresAt: Date;
@@ -38,7 +39,7 @@ function isDestructiveCommand(cmd: string): boolean {
   return DESTRUCTIVE_COMMANDS.some((d) => base === d.toLowerCase());
 }
 
-// GET /api/clin/vm/session — create or retrieve a Cline VM session for the user
+// GET /api/mss/agent/session — create or retrieve an MSS Agent VM session for the user
 export async function GET() {
   const session = await getSession();
   if (!session) {
@@ -61,24 +62,24 @@ export async function GET() {
     );
   }
 
-  // Return connection info for Cline agent
+  // Return connection info for MSS agent
   const vncPassword = vm.vncAccess?.password;
-  const clineToken = vm.vncAccess?.clineToken;
+  const mssToken = vm.vncAccess?.clineToken;
 
   return NextResponse.json({
-    sessionId: `cline-vm-${vm.id}`,
+    sessionId: `mss-vm-${vm.id}`,
     vmId: vm.id,
     sshHost: vm.vmIp || "127.0.0.1",
     sshPort: vm.sshPort || 22,
     sshUser: "shield",
     vncPort: vm.vncPort || 5901,
     vncPassword: vncPassword ?? null,
-    clineToken: clineToken ?? null,
+    mssToken: mssToken ?? null,
     state: vm.state,
   });
 }
 
-// POST /api/clin/vm/approve — human approves a destructive command for a session
+// POST /api/mss/agent/approve — human approves a destructive command for a session
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) {
@@ -101,12 +102,12 @@ export async function POST(req: Request) {
     });
   }
 
-  // Record the approval in context doc (CyberLabContextDocStep pattern)
+  // Record the approval in context doc (MSS Agent session pattern)
   await db.contextDocStep.create({
     data: {
       userId: session.userId,
-      stepType: "CLINE_VM_COMMAND_APPROVAL",
-      content: `Cline VM session ${sessionId}: human approved destructive command: ${command}`,
+      stepType: "MSS_VM_COMMAND_APPROVAL",
+      content: `MSS Agent session ${sessionId}: human approved destructive command: ${command}`,
       createdAt: new Date(),
     },
   });
