@@ -179,6 +179,7 @@ export function AgentChat() {
       content: text,
     };
     setMessages((prev) => [...prev, userMsg]);
+    scrollBottom();
     setInput("");
     setSending(true);
     setPendingFiles([]);
@@ -276,6 +277,7 @@ export function AgentChat() {
                   m.id === assistantId ? { ...m, content: accumulatedContent } : m,
                 ),
               );
+              scrollBottom();
             }
           } else if (eventType === "thinking") {
             if (typeof p.reasoning === "string" && !p.end) {
@@ -287,6 +289,7 @@ export function AgentChat() {
                     : m,
                 ),
               );
+              scrollBottom();
             }
           } else if (eventType === "content_start") {
             // T2: server sends content_start with { contentType: "reasoning", reasoning: "..." }
@@ -303,6 +306,7 @@ export function AgentChat() {
                     : m,
                 ),
               );
+              scrollBottom();
             }
           } else if (eventType === "iteration_start") {
             // T2: ignore — no UI output needed
@@ -313,6 +317,7 @@ export function AgentChat() {
                 m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
               ),
             );
+            scrollBottom();
           } else if (eventType === "tool-result") {
             accumulatedTools.push({
               toolName: p.toolName ?? "tool",
@@ -324,6 +329,7 @@ export function AgentChat() {
                 m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
               ),
             );
+            scrollBottom();
           } else if (eventType === "done") {
             setMessages((prev) =>
               prev.map((m) =>
@@ -357,6 +363,7 @@ export function AgentChat() {
               void fetchSessions();
             }
             if (p.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
+            scrollBottom();
           } else if (eventType === "error") {
             setError(p.message || "Chat failed");
           }
@@ -440,12 +447,6 @@ export function AgentChat() {
             {sessionsError && (
               <div className="px-3 py-2 text-xs text-rose-400">{sessionsError}</div>
             )}
-            <button
-              onClick={newChat}
-              className="w-full text-left px-3 py-2 text-xs text-fg hover:bg-bg-elevated/50 border-b border-border/50"
-            >
-              + New chat
-            </button>
             {sessions.length === 0 && (
               <div className="px-3 py-2 text-xs text-fg-muted italic">
                 No previous chats yet.

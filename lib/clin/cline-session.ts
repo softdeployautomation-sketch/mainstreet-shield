@@ -297,6 +297,11 @@ ARTEX orchestration tools (call ARTEX sidecar at 127.0.0.1:8787 via HTTP):
 - artex_scan_results — Retrieve findings from a completed ARTEX task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.
 - artex_scan_stop — Stop a running ARTEX task. Input: { taskId }. Returns { taskId, stopped: true }.
 
+Asset write tools (MainStreet company DB):
+- create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset").
+- update_asset — Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Use when the user wants to change an asset's name, scope, type, target, or group.
+- add_asset_to_group — Assign an existing asset to a group. Input: { id, groupId }. Use when the user wants to organize an asset under a group.
+
 Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
@@ -675,6 +680,144 @@ export function mssTools(userId: string): AgentTool[] {
           taskId,
           stopped: true,
         };
+      },
+    },
+
+    // Asset write tools (MainStreet DB via existing API routes)
+    {
+      name: "create_asset",
+      description:
+        "Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. 'add example.com as an asset').",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Asset display name" },
+          type: { type: "string", description: "web | api | network | mobile" },
+          target: { type: "string", description: "Host, IP, URL, or target identifier" },
+          inScope: { type: "boolean", description: "Whether the asset is in scope (default true)" },
+          groupId: { type: "string", description: "Optional group id to assign the asset to" },
+        },
+        required: ["name", "type", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { name, type, target, inScope, groupId } = input as {
+          name: string;
+          type: string;
+          target: string;
+          inScope?: boolean;
+          groupId?: string;
+        };
+
+        const company = await db.company.findUnique({
+          where: { userId },
+        });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const res = await fetch("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            type,
+            target,
+            inScope: inScope ?? true,
+            ...(groupId !== undefined && { groupId }),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return { error: err.error || "asset creation failed" };
+        }
+        const data = await res.json();
+        return { ok: true, asset: data.asset };
+      },
+    },
+
+    {
+      name: "update_asset",
+      description:
+        "Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Ownership is verified by the API route. Use when the user wants to change an asset's name, scope, type, target, or group.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Asset id" },
+          name: { type: "string", description: "New display name" },
+          type: { type: "string", description: "web | api | network | mobile" },
+          target: { type: "string", description: "New host, IP, URL, or target" },
+          inScope: { type: "boolean", description: "Whether the asset is in scope" },
+          groupId: { type: "string", description: "Group id to assign (or null to unassign)" },
+        },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { id, ...fields } = input as {
+          id: string;
+          name?: string;
+          type?: string;
+          target?: string;
+          inScope?: boolean;
+          groupId?: string | null;
+        };
+
+        const company = await db.company.findUnique({
+          where: { userId },
+        });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return { error: err.error || "asset update failed" };
+        }
+        const data = await res.json();
+        return { ok: true, asset: data.asset };
+      },
+    },
+
+    {
+      name: "add_asset_to_group",
+      description:
+        "Assign an existing asset to a group. Input: { id, groupId }. Ownership is verified by the API route. Use when the user wants to organize an asset under a group.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Asset id" },
+          groupId: { type: "string", description: "Group id to assign" },
+        },
+        required: ["id", "groupId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { id, groupId } = input as { id: string; groupId: string };
+
+        const company = await db.company.findUnique({
+          where: { userId },
+        });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groupId }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          return { error: err.error || "assign asset to group failed" };
+        }
+        const data = await res.json();
+        return { ok: true, asset: data.asset };
       },
     },
   ];

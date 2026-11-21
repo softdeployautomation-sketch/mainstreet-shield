@@ -6,6 +6,10 @@ import { z } from "zod";
 export const dynamic = "force-dynamic";
 
 const updateAssetSchema = z.object({
+  name: z.string().min(1).optional(),
+  type: z.enum(["web", "api", "network", "mobile"]).optional(),
+  target: z.string().min(1).optional(),
+  inScope: z.boolean().optional(),
   groupId: z.string().nullable().optional(),
 });
 
@@ -87,7 +91,11 @@ export async function PATCH(
     const updated = await db.companyAsset.update({
       where: { id },
       data: {
-        groupId: data.groupId ?? null,
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.type !== undefined && { type: data.type }),
+        ...(data.target !== undefined && { target: data.target }),
+        ...(data.inScope !== undefined && { inScope: data.inScope }),
+        ...(data.groupId !== undefined && { groupId: data.groupId }),
       },
       include: { group: true },
     });
