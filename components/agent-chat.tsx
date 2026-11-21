@@ -31,6 +31,7 @@ export function AgentChat() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionsPanelOpen, setSessionsPanelOpen] = useState(false);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [modelId, setModelId] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -90,6 +91,7 @@ export function AgentChat() {
   const newChat = useCallback(() => {
     setMessages([]);
     setSessionId(null);
+    setSessionTitle(null);
     setError("");
     setPendingFiles([]);
     setSessionsPanelOpen(false);
@@ -118,6 +120,7 @@ export function AgentChat() {
         );
         setMessages(msgs);
         setSessionId(id);
+        setSessionTitle(sessions.find((s) => s.id === id)?.title ?? null);
         setError("");
         setSessionsPanelOpen(false);
       } catch (err) {
@@ -125,7 +128,7 @@ export function AgentChat() {
         setError(err instanceof Error ? err.message : "Failed to load conversation");
       }
     },
-    [],
+    [sessions],
   );
 
   // --- file attach (A-0c) --------------------------------------------------
@@ -200,12 +203,13 @@ export function AgentChat() {
       };
       setMessages((prev) => [...prev, assistantMsg]);
       if (data.sessionId) setSessionId(data.sessionId);
+      if (data.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setSending(false);
     }
-  }, [input, sending, sessionId, pendingFiles, modelId]);
+  }, [input, sending, sessionId, pendingFiles, modelId, sessionTitle]);
 
   const scrollBottom = () => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -214,7 +218,7 @@ export function AgentChat() {
     scrollBottom();
   }, [messages]);
 
-  const sessionLabel = sessionId ? `Session ${sessionId.slice(-6)}` : "New chat";
+  const sessionLabel = sessionTitle || (sessionId ? "Chat" : "New chat");
 
   return (
     <div className="flex flex-col h-full">
@@ -318,15 +322,6 @@ export function AgentChat() {
             key={msg.id}
             className={`flex flex-col gap-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${
-                msg.role === "user"
-                  ? "bg-brand-600 text-white ml-auto"
-                  : "bg-bg-elevated border border-border text-fg"
-              }`}
-            >
-              {msg.content}
-            </div>
             {msg.role === "assistant" && msg.thinking && msg.thinking.length > 0 && (
               <div className="ml-0 flex flex-col gap-1">
                 <button
@@ -344,6 +339,15 @@ export function AgentChat() {
                 </div>
               </div>
             )}
+            <div
+              className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${
+                msg.role === "user"
+                  ? "bg-brand-600 text-white ml-auto"
+                  : "bg-bg-elevated border border-border text-fg"
+              }`}
+            >
+              {msg.content}
+            </div>
           </div>
         ))}
         {error && (

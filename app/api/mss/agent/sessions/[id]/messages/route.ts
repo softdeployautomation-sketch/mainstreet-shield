@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { readClineMessages } from "@/lib/clin/cline-session";
+import { readClineMessages, normalizeClineMessagesForUi } from "@/lib/clin/cline-session";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +36,9 @@ export async function GET(
       { status: 500 },
     );
   }
+  // FIX-1: normalize content blocks → {content, thinking[]} so the UI
+  // never receives empty strings for array/block-based content.
+  messages = normalizeClineMessagesForUi(messages);
   return NextResponse.json({ sessionId, messages });
 }
 

@@ -169,6 +169,8 @@ const MSS_SYSTEM_PROMPT = `You are the MSS Agent for MainStreet Shield, a Cline-
 
 You help the user research and validate security findings on systems they own and have explicitly authorized for testing. Reason through the task, use your tools when appropriate, and be concise and direct.
 
+Enabled Cline tools: shell, file, search, web. You may use these tools to inspect targets, read files, run safe validation commands, and gather evidence. Do not claim you lack tools — they are enabled.
+
 Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
@@ -376,6 +378,86 @@ export async function readClineMessages(sessionId: string): Promise<MessageWithM
     orderBy: { createdAt: "asc" },
   });
   return rows.map((row) => clineAgentMessageToMessage(row));
+}
+
+// ---------------------------------------------------------------------------
+// FIX-1: normalize Cline transcript messages for UI consumption.
+//
+// ClineCore returns `MessageWithMetadata` where `content` is `string |
+// ContentBlock[]` and `thinking` lives inside blocks (not `m.thinking`).
+// The frontend `Message` type expects `content: string` + `thinking:
+// string[]`, so we normalize server-side before the JSON response.
+// ---------------------------------------------------------------------------
+
+export interface ClineUiMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  thinking: string[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | null {
+  // JSON round-trip can nest the real message under `wrapper.message`.
+  const wrapper = asRecord(m);
+  if (!wrapper) return null;
+
+  const inner: Record<string, unknown> =
+    wrapper.message && typeof wrapper.message === "object"
+      ? (wrapper.message as Record<string, unknown>)
+      : wrapper;
+
+  const role =
+    inner.role === "user" || inner.role === "assistant"
+      ? (inner.role as "user" | "assistant")
+      : null;
+  if (!role) return null;
+
+  const texts: string[] = [];
+  const thinking: string[] = [];
+  const parts: unknown[] =
+    typeof inner.content === "string"
+      ? [{ type: "text", text: inner.content }]
+      : Array.isArray(inner.content)
+        ? inner.content
+        : [];
+
+  for (const rawPart of parts) {
+    const part = asRecord(rawPart);
+    if (!part) continue;
+    const type = String(part.type ?? "");
+    if (type === "text") {
+      if (typeof part.text === "string" && part.text.trim()) texts.push(part.text);
+    } else if (type === "thinking" || type === "reasoning") {
+      const value = part.thinking ?? part.text;
+      if (typeof value === "string" && value.trim()) thinking.push(value);
+    } else if (typeof part.text === "string" && part.text.trim()) {
+      texts.push(part.text);
+    }
+  }
+
+  if (texts.length === 0 && thinking.length === 0) return null;
+
+  return {
+    id: typeof m.id === "string" ? m.id : randomUUID(),
+    role,
+    content: texts.join("\n\n"),
+    thinking,
+  };
+}
+
+export function normalizeClineMessagesForUi(
+  messages: MessageWithMetadata[],
+): ClineUiMessage[] {
+  const out: ClineUiMessage[] = [];
+  for (const m of messages) {
+    const n = normalizeClineMessageForUi(m);
+    if (n) out.push(n);
+  }
+  return out;
 }
 
 // B-3: map a stored transcript row back to a Cline MessageWithMetadata so the
