@@ -9,7 +9,7 @@ import {
 
 const chatSchema = z.object({
   message: z.string().min(1),
-  sessionId: z.string().optional(),
+  sessionId: z.string().nullable().optional(),
   modelId: z.string().optional(),
   userImages: z.array(z.string()).optional(),
   userFiles: z.array(z.string()).optional(),
