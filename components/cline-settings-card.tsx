@@ -178,13 +178,19 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
   }, []);
 
   // Log out / switch account
+  const [logoutError, setLogoutError] = useState("");
+
   const handleLogout = useCallback(async () => {
+    setLogoutError("");
     const res = await fetch("/api/clin/auth/logout", {
       method: "POST",
       credentials: "same-origin",
     });
     if (res.ok) {
       setAuth({ connected: false, email: null, expires: null, updatedAt: null });
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setLogoutError(data.error || `Logout failed (${res.status})`);
     }
   }, []);
 
@@ -216,6 +222,11 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
                 >
                   Log out
                 </button>
+                {logoutError && (
+                  <span className="text-[10px] text-rose-400 ml-1">
+                    {logoutError}
+                  </span>
+                )}
               </div>
             ) : (
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-rose-500/10 text-rose-400 text-xs border border-rose-500/20">
