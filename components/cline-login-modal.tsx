@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CopyButton from "@/components/CopyButton";
 
 interface ClineLoginModalProps {
@@ -20,6 +20,8 @@ function mmss(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+type Status = "idle" | "checking" | "pending" | "success" | "error";
+
 export function ClineLoginModal({
   open,
   onClose,
@@ -30,9 +32,11 @@ export function ClineLoginModal({
   expiresIn,
   pollIntervalSeconds = 5,
 }: ClineLoginModalProps) {
-  const [status, setStatus] = useState<"idle" | "checking" | "success" | "error">("idle");
+  const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
@@ -46,11 +50,14 @@ export function ClineLoginModal({
     setError("");
   }, [open, expiresIn]);
 
-  const remaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) : 0;
+  const remaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0;
   const expired = remaining <= 0;
-  const checkingLabel = status === "checking" ? "Checking…" : "Check now";
+  const checkingLabel =
+    status === "checking" || status === "pending" ? "Checking…" : "Check now";
 
   const checkNow = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setStatus("checking");
     setError("");
     try {
@@ -58,22 +65,57 @@ export function ClineLoginModal({
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceCode }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string; connected?: boolean; email?: string };
-      if (!res.ok) {
-        setStatus("error");
-        setError(data.error || "Device code not yet completed or expired");
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        connected?: boolean;
+        pending?: boolean;
+        email?: string;
+      };
+
+      // 202 — still waiting for the user to approve at authkit (NOT success).
+      if (res.status === 202 || data.pending === true) {
+        setStatus("pending");
+        setError("");
         return;
       }
-      setStatus("success");
-      onSuccess();
+      if (res.ok && data.connected === true) {
+        setStatus("success");
+        onSuccess();
+        return;
+      }
+      // 410 expired · 403 denied · 502 unreachable · 400 no pending code
+      setStatus("error");
+      setError(data.error || "Device code not yet completed or expired");
     } catch {
       setStatus("error");
       setError("Failed to check login status. Try again.");
+    } finally {
+      inFlightRef.current = false;
     }
-  }, [onSuccess]);
+  }, [deviceCode, onSuccess]);
+
+  // Auto-poll while the modal is open, not expired, and not already connected.
+  useEffect(() => {
+    if (!open || expired || status === "success" || status === "error") return;
+    const intervalMs = Math.max(3, pollIntervalSeconds) * 1000;
+    const timer = setInterval(() => {
+      void checkNow();
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [open, expired, status, pollIntervalSeconds, checkNow]);
+
+  // Live countdown while open.
+  useEffect(() => {
+    if (!open || !expiresAt) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [open, expiresAt]);
 
   if (!open) return null;
+
+  const showForm = status === "idle" || status === "checking" || status === "pending";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -102,8 +144,16 @@ export function ClineLoginModal({
             </div>
           )}
 
-          {status === "idle" && (
+          {showForm && (
             <>
+              {status === "pending" && (
+                <div className="rounded bg-brand-500/10 border border-brand-500/30 p-3 mb-4">
+                  <p className="text-xs text-brand-400 font-mono">
+                    Still waiting for approval on Cline…
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-3 mb-4">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-mono text-fg-muted">1. Visit:</label>
@@ -139,9 +189,11 @@ export function ClineLoginModal({
               <div className="flex gap-3">
                 <button
                   onClick={checkNow}
-                  disabled={expired}
+                  disabled={expired || status === "checking" || status === "pending"}
                   className="flex-1 rounded bg-brand-600 px-4 py-2.5 text-sm font-mono font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:!bg-brand-500 disabled:hover:!bg-brand-600"
-                >{checkingLabel}</button>
+                >
+                  {checkingLabel}
+                </button>
                 <button
                   onClick={onClose}
                   className="flex-1 rounded border border-border bg-white px-4 py-2.5 text-sm font-mono text-fg hover:bg-bg-elevated"
@@ -152,7 +204,7 @@ export function ClineLoginModal({
 
               {expired && (
                 <p className="mt-3 text-xs text-fg-muted">
-                  The device code expired. Click "Log in to Cline" again to start a new flow.
+                  The device code expired. Click &quot;Log in to Cline&quot; again to start a new flow.
                 </p>
               )}
             </>

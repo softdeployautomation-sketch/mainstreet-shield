@@ -45,6 +45,7 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
     userCode: string;
     verificationUri: string;
     expiresIn: number;
+    pollInterval?: number;
   } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState("");
@@ -146,6 +147,7 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
         userCode: data.userCode,
         verificationUri: data.verificationUri,
         expiresIn: data.expiresIn,
+        pollInterval: data.pollInterval,
       });
       setModalOpen(true);
     } catch (err) {
@@ -306,6 +308,7 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
             userCode={modalData.userCode}
             verificationUri={modalData.verificationUri}
             expiresIn={modalData.expiresIn}
+            pollIntervalSeconds={modalData.pollInterval ?? 5}
           />
         )}
       </div>

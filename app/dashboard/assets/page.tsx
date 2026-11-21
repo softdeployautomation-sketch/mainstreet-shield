@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { AddAssetForm } from "@/components/add-asset-form";
 
 export const metadata: Metadata = {
   title: "Assets — MainStreet Shield",
@@ -85,48 +86,7 @@ export default async function AssetsPage() {
         {canManage ? (
           <div className="rounded-xl border border-border bg-bg-elevated p-6 mb-8">
             <h2 className="text-lg font-display font-bold mb-4">Add Asset</h2>
-            <form action="/api/assets" method="post" className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-              <div className="col-span-1 md:col-span-2">
-                <label className="block text-xs text-fg-muted mb-1">
-                  Target (domain, IP, or URL)
-                </label>
-                <input
-                  name="target"
-                  type="text"
-                  required
-                  placeholder="e.g. example.com or 1.2.3.4 or https://example.com"
-                  className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-fg-muted mb-1">Type</label>
-                <select
-                  name="type"
-                  defaultValue="web"
-                  className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="web">Web</option>
-                  <option value="api">API</option>
-                  <option value="network">Network</option>
-                  <option value="mobile">Mobile</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-fg-muted mb-1">Name</label>
-                <input
-                  name="name"
-                  type="text"
-                  placeholder="Optional display name"
-                  className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <button
-                type="submit"
-                className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-              >
-                Add Asset
-              </button>
-            </form>
+            <AddAssetForm />
             <p className="mt-3 text-sm text-fg-muted">
               Monitored targets for security testing
             </p>

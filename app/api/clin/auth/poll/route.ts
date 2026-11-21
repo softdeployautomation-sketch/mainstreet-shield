@@ -1,67 +1,81 @@
-// Generate OAuth token locally (no @cline/sdk dependency)
-const generateOAuthToken = async (deviceCode: string) => {
-  // In production, this would call Cline's token API
-  // For now, return a mock token structure
-  return {
-    access: `token-${deviceCode}`,
-    email: null,
-    expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
-  };
-};
-
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-
-import { getClineAuthSession, saveClineOAuthToken } from "@/lib/clin/token-store";
+import { pollClineDeviceAuth } from "@/lib/clin/device-auth";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/clin/auth/poll — Poll for Cline device-code completion.
-// Blocks (bounded by a server timeout) until the user authorizes at
-// authkit.cline.bot/device, then encrypts and stores the OAuth token at rest.
+/**
+ * TASK_258 F-1 — the endpoint the login modal polls while the user approves
+ * the code at authkit.cline.bot. The server (not the UI) exchanges the
+ * device code, then stores the OAuth token via token-store.
+ *
+ * HTTP mapping (mirrors spaceworker auth-response):
+ *  200 connected · 202 still waiting · 410 expired · 403 denied · 502 unreachable
+ */
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
-  const auth = await getClineAuthSession(session.userId);
-  const deviceCode = auth?.deviceCode;
-  const expiresAt = auth?.deviceCodeExpiresAt ? new Date(auth.deviceCodeExpiresAt) : null;
-
-  if (!deviceCode || !expiresAt || expiresAt.getTime() <= Date.now()) {
-    return NextResponse.json(
-      { error: "No pending device code. Start login first." },
-      { status: 400 },
-    );
+  // Optional body: { deviceCode?, windowSeconds? }. Empty body is valid —
+  // falls back to the user's newest pending code from ClineAuthSession.
+  let body: { deviceCode?: unknown; windowSeconds?: unknown } = {};
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    // ignore — empty body
   }
 
-  // Bound the wait so a route handler never hangs indefinitely. The client
-  // retries "Check now" until the device code is authorized or expires.
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25_000);
+  const windowSeconds = typeof body.windowSeconds === "number" ? body.windowSeconds : 8;
 
-  try {
-    const token = await generateOAuthToken(deviceCode);
-    clearTimeout(timeout);
+  const result = await pollClineDeviceAuth({
+    userId: session.userId,
+    windowSeconds,
+  });
 
-    const tokenExpiresAt = new Date(Date.now() + (token.expires ?? 0));
-    await saveClineOAuthToken({
-      userId: session.userId,
-      token: token.access,
-      email: token.email ?? undefined,
-      expiresAt: tokenExpiresAt,
-    });
-
-    return NextResponse.json({
-      connected: true,
-      email: token.email ?? null,
-      expiresAt: tokenExpiresAt,
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Device code not yet completed or expired" },
-      { status: 400 },
-    );
+  switch (result.status) {
+    case "connected":
+      return NextResponse.json({
+        ok: true,
+        connected: true,
+        email: result.email,
+        expires: result.expires,
+        message: "Cline account connected successfully",
+      });
+    case "pending":
+      return NextResponse.json(
+        {
+          ok: false,
+          connected: false,
+          pending: true,
+          error: result.message,
+          message: result.message,
+          retryAfterSeconds: result.retryAfterSeconds,
+        },
+        { status: 202 },
+      );
+    case "expired":
+      return NextResponse.json(
+        { ok: false, connected: false, expired: true, error: result.message, message: result.message },
+        { status: 410 },
+      );
+    case "denied":
+      return NextResponse.json(
+        { ok: false, connected: false, denied: true, error: result.message, message: result.message },
+        { status: 403 },
+      );
+    case "unreachable":
+      return NextResponse.json(
+        {
+          ok: false,
+          connected: false,
+          retry: true,
+          error: result.message,
+          message: result.message,
+          retryAfterSeconds: result.retryAfterSeconds,
+        },
+        { status: 502 },
+      );
   }
 }
