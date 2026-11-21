@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { AddAssetForm } from "@/components/add-asset-form";
+import { AssetGroupsPanel } from "@/components/asset-groups-panel";
 import { GroupSelector } from "@/components/group-selector";
 
 export const metadata: Metadata = {
@@ -146,98 +147,7 @@ export default async function AssetsPage() {
           </div>
         )}
 
-        {/* Asset Groups management (B-6) */}
-        {canManage && hasCompany && (
-          <div className="rounded-xl border border-border bg-bg-elevated p-6 mb-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-              <div>
-                <h2 className="text-lg font-display font-bold">Asset Groups</h2>
-                <p className="text-sm text-fg-muted">
-                  Organize assets into folders/groups.
-                </p>
-              </div>
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const formData = new FormData(e.target as HTMLFormElement);
-                  const name = formData.get("name") as string;
-                  const res = await fetch("/api/asset-groups", {
-                    method: "POST",
-                    credentials: "same-origin",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name }),
-                  });
-                  if (res.ok) {
-                    (e.target as HTMLFormElement).reset();
-                    // eslint-disable-next-line no-restricted-globals
-                    location.reload();
-                  }
-                }}
-                className="flex gap-2"
-              >
-                <input
-                  name="name"
-                  type="text"
-                  required
-                  placeholder="New group name…"
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-                />
-                <button
-                  type="submit"
-                  className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-                >
-                  Create
-                </button>
-              </form>
-            </div>
-            {groups.length === 0 ? (
-              <p className="text-sm text-fg-muted italic">
-                No groups yet. Create your first group above.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {groups.map((g) => {
-                  const groupAssets = assets.filter((a) => a.groupId === g.id);
-                  return (
-                    <div
-                      key={g.id}
-                      className="flex items-center justify-between px-3 py-2 rounded border border-border/50 bg-zinc-900/30"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-mono text-fg">{g.name}</span>
-                        <span className="text-xs text-fg-muted">
-                          {groupAssets.length} asset{
-                            groupAssets.length !== 1 ? "s" : ""
-                          }
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (
-                            confirm(
-                              `Delete group "${g.name}"? Assets will become ungrouped.`,
-                            )
-                          ) {
-                            fetch(`/api/asset-groups/${g.id}`, {
-                              method: "DELETE",
-                              credentials: "same-origin",
-                            }).then(() => {
-                              // eslint-disable-next-line no-restricted-globals
-                              location.reload();
-                            });
-                          }
-                        }}
-                        className="text-xs text-rose-500 hover:text-rose-400"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+        <AssetGroupsPanel groups={groups} canManage={canManage} />
 
         {/* Add asset form (manage tiers only) */}
         {canManage && hasCompany ? (
