@@ -95,6 +95,7 @@ model Company {
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   assets CompanyAsset[]
+  groups CompanyAssetGroup[]
   workflows Workflow[]
 }
 
@@ -107,9 +108,26 @@ model CompanyAsset {
   target      String   // domain, IP, URL
   inScope     Boolean  @default(true)
   notes       String?
+  groupId     String?   // B-6: optional asset group/folder
   createdAt   DateTime @default(now())
 
+  company  Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  group    CompanyAssetGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+}
+
+// ---------------------------------------------------------------------------
+// CompanyAssetGroup — folders/groups for organizing company assets (B-6)
+// ---------------------------------------------------------------------------
+model CompanyAssetGroup {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  createdAt DateTime @default(now())
+
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assets  CompanyAsset[]
+
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +250,8 @@ model ShieldKillSwitch {
 model MssAgentSession {
   id        String   @id @default(cuid())
   userId    String
-  vmId      String?
+  title     String?   // B-2: chat session title (repurposed from VM actions to agent chat)
+  vmId      String?   // kept optional; VM-specific field now unused by chat sessions
   status    String   @default("active") // active | completed | failed
   startedAt DateTime @default(now())
   endedAt   DateTime?
@@ -240,6 +259,24 @@ model MssAgentSession {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// B-3: chat transcript fallback store so sessions survive ClineCore recreation.
+// The Cline SDK reads transcripts from its local file backend; if that ever
+// comes back empty (e.g. across serverless invocations) we fall back to these
+// rows so session switching still loads the conversation.
+// ---------------------------------------------------------------------------
+model ClineAgentMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  role      String   // "user" | "assistant"
+  content   Json     // { text: string, thinking?: string[] }
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------

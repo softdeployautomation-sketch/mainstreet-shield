@@ -23,7 +23,12 @@ export async function GET() {
 
   const company = await db.company.findUnique({
     where: { userId: session.userId },
-    include: { assets: { orderBy: { createdAt: "desc" } } },
+    include: {
+      assets: {
+        orderBy: { createdAt: "desc" },
+        include: { group: true },
+      },
+    },
   });
 
   return NextResponse.json({ assets: company?.assets ?? [] });
@@ -58,7 +63,14 @@ export async function POST(req: Request) {
     where: { userId: session.userId },
   });
   if (!company) {
-    return NextResponse.json({ error: "company not found" }, { status: 404 });
+    return NextResponse.json(
+      {
+        error: "company_not_found",
+        message: "Create your company first before adding assets.",
+        companyUrl: "/company",
+      },
+      { status: 404 },
+    );
   }
 
   try {

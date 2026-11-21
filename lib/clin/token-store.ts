@@ -42,9 +42,12 @@ export async function saveClineOAuthToken(params: {
 export async function getClineOAuthToken(userId: string): Promise<string | null> {
   const row = await db.clineAuthSession.findUnique({
     where: { userId },
-    select: { clineOAuthTokenEnc: true, connected: true },
+    select: { clineOAuthTokenEnc: true, connected: true, expiresAt: true },
   });
   if (!row?.clineOAuthTokenEnc || !row.connected) return null;
+  // B-1: an expired OAuth token is treated as disconnected so the caller can
+  // re-login instead of sending a stale key the Cline SDK will reject.
+  if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) return null;
   try {
     return decryptSecret(row.clineOAuthTokenEnc);
   } catch {

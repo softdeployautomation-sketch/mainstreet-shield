@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 /**
  * F-2 — Add Asset form.
@@ -22,6 +23,9 @@ export function AddAssetForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  // B-4: company-missing guidance state
+  const [companyMissing, setCompanyMissing] = useState(false);
+  const [companyUrl, setCompanyUrl] = useState("/company");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,9 +44,22 @@ export function AddAssetForm() {
           name: name.trim() || undefined,
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        companyUrl?: string;
+      };
       if (!res.ok) {
-        throw new Error(data.error || `Asset creation failed (${res.status})`);
+        // B-4: show a clear "Create Company first" message with a link when
+        // no company exists, instead of a generic/cryptic error.
+        if (data.error === "company_not_found") {
+          setError(data.message || "Create your company first before adding assets.");
+          setCompanyMissing(true);
+          setCompanyUrl(data.companyUrl || "/company");
+          setSubmitting(false);
+          return;
+        }
+        throw new Error(data.message || data.error || `Asset creation failed (${res.status})`);
       }
       setSuccess(`Added ${target.trim()} — it is now in your asset list.`);
       setTarget("");
@@ -115,6 +132,17 @@ export function AddAssetForm() {
           {error}
         </p>
       ) : null}
+      {companyMissing && (
+        <div className="col-span-full rounded border border-rose-500/30 bg-rose-900/20 p-4 mt-2">
+          <p className="text-sm text-rose-400 font-mono mb-2">{error}</p>
+          <Link
+            href={companyUrl}
+            className="inline-block rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+          >
+            Create Company first
+          </Link>
+        </div>
+      )}
       {success ? (
         <p className="col-span-full text-sm text-emerald-400 font-mono" role="status">
           {success}

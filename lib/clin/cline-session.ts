@@ -13,7 +13,7 @@ import {
   ThinkingContent,
 } from "@cline/sdk";
 
-import { getClineOAuthToken } from "@/lib/clin/token-store";
+import { getClineOAuthToken, clearClineAuthSession } from "@/lib/clin/token-store";
 import { decryptSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
 
@@ -83,6 +83,21 @@ async function resolveClineCredentials(userId: string): Promise<ClineCredentials
   }
 
   return null;
+}
+
+// B-1: classify Cline SDK auth failures so they surface as "connect Cline first"
+// instead of leaking the raw SDK "Unauthorized ... (Request ID: ...)" message.
+export function isClineAuthError(err: unknown): boolean {
+  const e = err as {
+    status?: number;
+    statusCode?: number;
+    message?: string;
+    code?: string;
+  } | null;
+  const status = e?.status ?? e?.statusCode;
+  if (status === 401 || status === 403) return true;
+  const message = typeof e?.message === "string" ? e.message : String(err ?? "");
+  return /unauthorized|re-authenticate|invalid_grant|invalid token|token expired|authentication failed/i.test(message);
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +220,17 @@ export async function startClineSession(
     });
     resultText = startResult.result?.text ?? "";
   } catch (err) {
+    if (isClineAuthError(err)) {
+      await clearClineAuthSession(input.userId).catch(() => {});
+      return {
+        sessionId,
+        response: "",
+        thinking: [],
+        status: "failed",
+        error: "cline_disconnected",
+        clineReady: false,
+      };
+    }
     return {
       sessionId,
       response: "",
@@ -217,10 +243,20 @@ export async function startClineSession(
 
   const messages = await core.readMessages(sessionId).catch(() => [] as MessageWithMetadata[]);
   const { response, thinking } = extractTurnResult(messages);
+  const assistantResponse = response || resultText;
+
+  // B-3: persist the turn so the transcript survives ClineCore recreation.
+  await persistClineTurn({
+    sessionId,
+    userId: input.userId,
+    userPrompt: input.prompt,
+    assistantResponse,
+    thinking,
+  }).catch(() => {});
 
   return {
     sessionId,
-    response: response || resultText,
+    response: assistantResponse,
     thinking,
     status: "completed",
     clineReady: true,
@@ -241,6 +277,7 @@ export interface SendClineMessageResult {
   thinking: string[];
   status: "completed" | "failed";
   error?: string;
+  clineReady?: boolean;
 }
 
 export async function sendClineMessage(
@@ -266,6 +303,17 @@ export async function sendClineMessage(
       userFiles: input.userFiles,
     });
   } catch (err) {
+    if (isClineAuthError(err)) {
+      await clearClineAuthSession(input.userId).catch(() => {});
+      return {
+        sessionId: input.sessionId,
+        response: "",
+        thinking: [],
+        status: "failed",
+        error: "cline_disconnected",
+        clineReady: false,
+      };
+    }
     return {
       sessionId: input.sessionId,
       response: "",
@@ -277,6 +325,15 @@ export async function sendClineMessage(
 
   const messages = await core.readMessages(input.sessionId).catch(() => [] as MessageWithMetadata[]);
   const { response, thinking } = extractTurnResult(messages);
+
+  // B-3: persist the turn so the transcript survives ClineCore recreation.
+  await persistClineTurn({
+    sessionId: input.sessionId,
+    userId: input.userId,
+    userPrompt: input.prompt,
+    assistantResponse: response,
+    thinking,
+  }).catch(() => {});
 
   return {
     sessionId: input.sessionId,
@@ -298,7 +355,68 @@ export async function getClineSession(sessionId: string): Promise<unknown | unde
 
 export async function readClineMessages(sessionId: string): Promise<MessageWithMetadata[]> {
   const core = await getCline();
-  return core.readMessages(sessionId);
+  let messages: MessageWithMetadata[];
+  try {
+    messages = await core.readMessages(sessionId);
+  } catch {
+    messages = [];
+  }
+  if (messages && messages.length > 0) return messages;
+
+  // B-3: DB fallback — session transcripts survive ClineCore recreation.
+  const rows = await db.clineAgentMessage.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.map((row) => clineAgentMessageToMessage(row));
+}
+
+// B-3: map a stored transcript row back to a Cline MessageWithMetadata so the
+// UI can render it identically to a live Cline read.
+function clineAgentMessageToMessage(row: {
+  id: string;
+  role: string;
+  content: unknown;
+  createdAt: Date;
+}): MessageWithMetadata {
+  const c = row.content as { text?: string; thinking?: string[] } | null;
+  const text = c?.text ?? "";
+  const thinking = c?.thinking ?? [];
+  const blocks: ContentBlock[] = [{ type: "text", text }];
+  for (const t of thinking) blocks.push({ type: "thinking", thinking: t });
+  return {
+    id: row.id,
+    role: row.role as "user" | "assistant",
+    content: blocks,
+    createdAt: row.createdAt,
+  } as MessageWithMetadata;
+}
+
+// B-3: persist a completed turn so the transcript survives ClineCore
+// recreation across serverless invocations.
+export async function persistClineTurn(params: {
+  sessionId: string;
+  userId: string;
+  userPrompt: string;
+  assistantResponse: string;
+  thinking: string[];
+}): Promise<void> {
+  await db.clineAgentMessage.create({
+    data: {
+      sessionId: params.sessionId,
+      userId: params.userId,
+      role: "user",
+      content: { text: params.userPrompt },
+    },
+  });
+  await db.clineAgentMessage.create({
+    data: {
+      sessionId: params.sessionId,
+      userId: params.userId,
+      role: "assistant",
+      content: { text: params.assistantResponse, thinking: params.thinking },
+    },
+  });
 }
 
 export async function stopClineSession(sessionId: string): Promise<void> {

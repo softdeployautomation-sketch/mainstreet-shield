@@ -27,7 +27,15 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const messages = await readClineMessages(sessionId);
+  let messages;
+  try {
+    messages = await readClineMessages(sessionId);
+  } catch {
+    return NextResponse.json(
+      { error: "Unable to load conversation. Try starting a new chat." },
+      { status: 500 },
+    );
+  }
   return NextResponse.json({ sessionId, messages });
 }
 

@@ -17,6 +17,7 @@ interface PendingFile {
 
 interface SessionRow {
   id: string;
+  title?: string;
   status: string;
   startedAt: string;
 }
@@ -28,6 +29,7 @@ export function AgentChat() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionsPanelOpen, setSessionsPanelOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
@@ -48,11 +50,16 @@ export function AgentChat() {
       const res = await fetch("/api/mss/agent/sessions", {
         credentials: "same-origin",
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setSessionsError(`Failed to load sessions (${res.status})`);
+        return;
+      }
       const data = await res.json();
       setSessions(data.sessions ?? []);
-    } catch {
-      // sessions list is best-effort UI chrome
+      setSessionsError(null);
+    } catch (err) {
+      // B-2: surface session-list errors instead of silently swallowing them.
+      setSessionsError(err instanceof Error ? err.message : "Failed to load sessions");
     }
   }, []);
 
@@ -75,7 +82,10 @@ export function AgentChat() {
           `/api/mss/agent/sessions/${encodeURIComponent(id)}/messages`,
           { credentials: "same-origin" },
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          setError(`Failed to load conversation (${res.status})`);
+          return;
+        }
         const data = await res.json();
         const msgs: Message[] = (data.messages ?? []).map(
           (m: any) =>
@@ -90,8 +100,9 @@ export function AgentChat() {
         setSessionId(id);
         setError("");
         setSessionsPanelOpen(false);
-      } catch {
-        // session switch is best-effort UI chrome
+      } catch (err) {
+        // B-3: surface session-switch errors instead of silently swallowing them.
+        setError(err instanceof Error ? err.message : "Failed to load conversation");
       }
     },
     [],
@@ -244,6 +255,9 @@ export function AgentChat() {
             Previous chats
           </div>
           <div className="max-h-60 overflow-y-auto">
+            {sessionsError && (
+              <div className="px-3 py-2 text-xs text-rose-400">{sessionsError}</div>
+            )}
             <button
               onClick={newChat}
               className="w-full text-left px-3 py-2 text-xs text-fg hover:bg-bg-elevated/50 border-b border-border/50"
@@ -261,7 +275,7 @@ export function AgentChat() {
                 onClick={() => void switchSession(s.id)}
                 className="w-full text-left px-3 py-2 text-xs text-fg hover:bg-bg-elevated/50 border-b border-border/50"
               >
-                <div className="font-mono truncate">{s.id.slice(-8)}</div>
+                <div className="font-mono truncate">{s.title ?? s.id.slice(-8)}</div>
                 <div className="text-[10px] text-fg-muted truncate">
                   {new Date(s.startedAt).toLocaleString()} ·
                   {s.status}

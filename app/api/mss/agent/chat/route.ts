@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import {
   sendClineMessage,
   startClineSession,
+  isClineAuthError,
 } from "@/lib/clin/cline-session";
 
 const chatSchema = z.object({
@@ -74,7 +75,10 @@ export async function POST(req: Request) {
   }
 
   if (result.status === "failed") {
-    if (result.error === "cline_disconnected") {
+    const isAuthFailure =
+      result.error === "cline_disconnected" ||
+      (typeof result.error === "string" && isClineAuthError(result.error));
+    if (isAuthFailure) {
       return NextResponse.json(
         {
           error: "connect_cline_first",
@@ -104,6 +108,7 @@ export async function POST(req: Request) {
       id: result.sessionId,
       userId: session.userId,
       status: "active",
+      title: message ? message.slice(0, 60) : undefined,
     },
   });
 

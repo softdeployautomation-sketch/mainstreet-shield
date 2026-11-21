@@ -18,6 +18,7 @@ export async function GET() {
     take: 50,
     select: {
       id: true,
+      title: true,
       status: true,
       startedAt: true,
       endedAt: true,

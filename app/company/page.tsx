@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import CompanyCreateForm from "@/app/company/company-create-form";
 
 export const metadata: Metadata = {
   title: "Company Onboarding — MainStreet Shield",
@@ -25,7 +26,7 @@ export default async function CompanyPage() {
   });
 
   if (existing) {
-    redirect("/dashboard");
+    redirect("/dashboard/assets");
   }
 
   return (
@@ -38,53 +39,7 @@ export default async function CompanyPage() {
         </span>
       </div>
 
-      <form
-        className="max-w-2xl bg-zinc-900/50 rounded-xl border border-zinc-800 p-6"
-        action={"/api/company/create"}
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Business Name
-            </label>
-            <input
-              name="name"
-              type="text"
-              required
-              className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-              placeholder="e.g. Acme Corp"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Domain (optional)
-            </label>
-            <input
-              name="domain"
-              type="text"
-              className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-              placeholder="e.g. example.com"
-            />
-          </div>
-        </div>
-        <div className="mb-4">
-          <label className="block text-xs text-zinc-400 mb-1">
-            Description / What do you want to secure?
-          </label>
-          <textarea
-            name="description"
-            rows={3}
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
-            placeholder="Tell us about your business and the assets you want us to test."
-          ></textarea>
-        </div>
-        <button
-          type="submit"
-          className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          Create Company Profile
-        </button>
-      </form>
+      <CompanyCreateForm />
     </div>
   );
 }

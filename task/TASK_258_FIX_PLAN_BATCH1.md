@@ -156,3 +156,22 @@ Agent engine, report sheet, attack frameworks, auto-workflow — Batch 2/3.
 
 --- Batch 2 AFTER (all A-0 phases complete; gates G-1..G-3 pass) ---
 
+## Batch 2 B-Bug Fixes (Chat, Sessions, Asset, Company, Grouping) — gates G-1..G-4 pass
+
+| When | Phase | Status | Notes |
+|---|---|---|---|
+| 2026-11-21 | **B-1 Chat "Unauthorized"** — BEFORE | DONE | `getClineOAuthToken` no expiry check; raw SDK "Unauthorized... (Request ID: ...)" leaked to UI |
+| 2026-11-21 | **B-1** — AFTER | DONE | `token-store.ts`: expiresAt check → null if expired. `cline-session.ts`: `isClineAuthError()` classifier, clears bad token, returns `cline_disconnected` + `clineReady: false`. `chat/route.ts`: maps auth failure → `connect_cline_first` (400). |
+| 2026-11-21 | **B-2 Session list only 1 chat** — BEFORE | DONE | `MssAgentSession` upsert missing `title`; `fetchSessions` errors silently swallowed; sessions not repurposed for agent chat |
+| 2026-11-21 | **B-2** — AFTER | DONE | `prisma.schema`: `title` field on `MssAgentSession`. `chat/route.ts`: stores title (first 60 chars of message). `sessions/route.ts`: selects title. `agent-chat.tsx`: surfaces session-list/switch errors instead of swallowing. |
+| 2026-11-21 | **B-3 Previous chat empty** — BEFORE | DONE | `readClineMessages` only reads ClineCore local storage; no DB fallback; empty transcript → silent empty UI |
+| 2026-11-21 | **B-3** — AFTER | DONE | `prisma.schema`: `ClineAgentMessage` model. `cline-session.ts`: `persistClineTurn` saves each turn; `readClineMessages` falls back to DB rows when ClineCore returns empty; clear 500 error if conversation can't load. |
+| 2026-11-21 | **B-4 Add Asset stuck** — BEFORE | DONE | No company check before asset creation; 404 "company not found" → "Adding…" forever; `router.refresh()` may interrupt |
+| 2026-11-21 | **B-4** — AFTER | DONE | `api/assets/route.ts`: structured `company_not_found` error with message + `companyUrl: "/company"`. `add-asset-form.tsx`: "Create Company first" banner with clickable link. |
+| 2026-11-21 | **B-5 Company onboarding blank** — BEFORE | DONE | `/company` server `<form>` POSTed urlencoded to JSON API → blank page; no discoverable path from Assets/Workflow; middleware redirect |
+| 2026-11-21 | **B-5** — AFTER | DONE | `company/page.tsx` + NEW `company/company-create-form.tsx`: client component POSTs JSON, redirects to `/dashboard/assets` on success. Assets page: "Add Company" link + "Create your company first" banner when no company exists. |
+| 2026-11-21 | **B-6 Asset grouping/folders** — BEFORE | DONE | `CompanyAsset` flat — no grouping capability |
+| 2026-11-21 | **B-6** — AFTER | DONE | `prisma.schema`: `CompanyAssetGroup` model + optional `groupId` on `CompanyAsset`. NEW `api/asset-groups/` routes + `api/asset-groups/[id]/route.ts`. `api/assets/[id]/route.ts` supports groupId. Assets page UI: group management + per-asset GroupSelector dropdown. |
+| 2026-11-21 | Gates G-1..G-4 | PASS | G-1 `tsc` 0 · G-2 `npm run build` 0 ✓ · G-3 `prisma validate` valid · G-4 no secrets in diff |
+| 2026-11-21 | Branch commit + push to main | DONE | Owner handle `prisma db push` + GitHub Actions "Build & Deploy" dispatch |
+
