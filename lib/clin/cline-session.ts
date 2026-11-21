@@ -933,13 +933,15 @@ export async function startClineSession(
     resultText = startResult.result?.text ?? "";
   } catch (err) {
     if (isClineAuthError(err)) {
-      await clearClineAuthSession(input.userId).catch(() => {});
+      // Don't clear credentials here — that destroys the user's stored token
+      // and creates an infinite re-auth loop. Just surface the error so the
+      // frontend can offer a proper re-auth path via Settings.
       return {
         sessionId,
         response: "",
         thinking: [],
         status: "failed",
-        error: "cline_disconnected",
+        error: err instanceof Error ? err.message : "cline_auth_error",
         clineReady: false,
       };
     }
@@ -1042,13 +1044,14 @@ export async function sendClineMessage(
     });
   } catch (err) {
     if (isClineAuthError(err)) {
-      await clearClineAuthSession(input.userId).catch(() => {});
+      // Don't clear credentials here — that destroys the user's stored token
+      // and creates an infinite re-auth loop. Just surface the error.
       return {
         sessionId: input.sessionId,
         response: "",
         thinking: [],
         status: "failed",
-        error: "cline_disconnected",
+        error: err instanceof Error ? err.message : "cline_auth_error",
         clineReady: false,
       };
     }
