@@ -43,8 +43,12 @@ export async function POST(req: Request) {
   const { message, sessionId, modelId, userImages, userFiles } = parsed.data;
 
   // Resume an existing runtime session, otherwise start a fresh Cline session.
+  // Everything is wrapped so an uncaught exception (ClineCore.create, SDK
+  // start/send, DB upsert) returns a JSON error instead of HTML 500 that the
+  // frontend can't parse — which previously surfaced as "Chat failed".
   let result;
-  if (sessionId) {
+  try {
+    if (sessionId) {
     result = await sendClineMessage({
       sessionId,
       userId: session.userId,
@@ -72,6 +76,16 @@ export async function POST(req: Request) {
       userImages,
       userFiles,
     });
+  }
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: err instanceof Error ? err.message : "Cline session failed",
+        sessionId: null,
+        clineReady: false,
+      },
+      { status: 500 },
+    );
   }
 
   if (result.status === "failed") {
@@ -101,16 +115,20 @@ export async function POST(req: Request) {
   }
 
   // Track the chat session per user so the previous-chat list (A-0d) has rows.
-  await db.mssAgentSession.upsert({
-    where: { id: result.sessionId },
-    update: { status: "active" },
-    create: {
-      id: result.sessionId,
-      userId: session.userId,
-      status: "active",
-      title: message ? message.slice(0, 60) : undefined,
-    },
-  });
+  try {
+    await db.mssAgentSession.upsert({
+      where: { id: result.sessionId },
+      update: { status: "active" },
+      create: {
+        id: result.sessionId,
+        userId: session.userId,
+        status: "active",
+        title: message ? message.slice(0, 60) : undefined,
+      },
+    });
+  } catch {
+    // Session tracking failure must not block a successful chat response.
+  }
 
   return NextResponse.json({
     response: result.response,

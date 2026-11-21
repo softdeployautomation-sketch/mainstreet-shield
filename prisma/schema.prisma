@@ -314,6 +314,7 @@ model ClineAuthSession {
   id                   String   @id @default(cuid())
   userId               String   @unique
   clineOAuthTokenEnc   String   // AES-GCM encrypted OAuth access token
+  clineRefreshTokenEnc String?  // AES-GCM encrypted OAuth refresh token (for getValidClineCredentials)
   email                String?
   expiresAt            DateTime?
   connected            Boolean  @default(false)

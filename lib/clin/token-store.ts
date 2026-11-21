@@ -1,23 +1,31 @@
 import "server-only";
 
+import { getValidClineCredentials } from "@cline/sdk";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
+import { getClineApiBaseUrl } from "./config";
+
+const REFRESH_BUFFER_MS = 60_000;
 
 /**
- * Persist a Cline OAuth access token, auto-encrypted at rest, on successful
- * device-code login. Upserts by userId so a re-login rotates the token.
+ * Persist a Cline OAuth access token (+ optional refresh token), auto-encrypted
+ * at rest, on successful device-code login. Upserts by userId so a re-login
+ * rotates the token.
  */
 export async function saveClineOAuthToken(params: {
   userId: string;
   token: string;
+  refreshToken?: string | null;
   email?: string | null;
   expiresAt?: Date | null;
 }): Promise<void> {
   const enc = encryptSecret(params.token);
+  const refreshEnc = params.refreshToken ? encryptSecret(params.refreshToken) : null;
   await db.clineAuthSession.upsert({
     where: { userId: params.userId },
     update: {
       clineOAuthTokenEnc: enc,
+      clineRefreshTokenEnc: refreshEnc ?? undefined,
       email: params.email ?? null,
       expiresAt: params.expiresAt ?? null,
       connected: true,
@@ -26,6 +34,7 @@ export async function saveClineOAuthToken(params: {
     create: {
       userId: params.userId,
       clineOAuthTokenEnc: enc,
+      clineRefreshTokenEnc: refreshEnc ?? undefined,
       email: params.email ?? null,
       expiresAt: params.expiresAt ?? null,
       connected: true,
@@ -36,23 +45,75 @@ export async function saveClineOAuthToken(params: {
 }
 
 /**
- * Decrypt and return the stored Cline OAuth access token for a user, or null
- * when none is stored / undecryptable.
+ * Return a usable Cline OAuth access token for a user, refreshing via
+ * `getValidClineCredentials` when the stored access token is expired or about
+ * to expire. Returns null only when credentials are missing or the refresh
+ * token was rejected (user must re-login).
  */
-export async function getClineOAuthToken(userId: string): Promise<string | null> {
+export async function getValidClineOAuthToken(userId: string): Promise<string | null> {
   const row = await db.clineAuthSession.findUnique({
     where: { userId },
-    select: { clineOAuthTokenEnc: true, connected: true, expiresAt: true },
+    select: {
+      clineOAuthTokenEnc: true,
+      clineRefreshTokenEnc: true,
+      connected: true,
+      expiresAt: true,
+    },
   });
   if (!row?.clineOAuthTokenEnc || !row.connected) return null;
-  // B-1: an expired OAuth token is treated as disconnected so the caller can
-  // re-login instead of sending a stale key the Cline SDK will reject.
-  if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) return null;
+
+  let access: string;
   try {
-    return decryptSecret(row.clineOAuthTokenEnc);
+    access = decryptSecret(row.clineOAuthTokenEnc);
   } catch {
     return null; // undecryptable — treat as empty so user can re-login
   }
+
+  let refresh: string | undefined;
+  if (row.clineRefreshTokenEnc) {
+    try {
+      refresh = decryptSecret(row.clineRefreshTokenEnc);
+    } catch {
+      // leave refresh undefined
+    }
+  }
+
+  const expires = row.expiresAt ? row.expiresAt.getTime() : undefined;
+
+  const current: { access: string; refresh?: string; expires?: number } = { access };
+  if (refresh) current.refresh = refresh;
+  if (expires) current.expires = expires;
+
+  const refreshed = await getValidClineCredentials(
+    current as { access: string; refresh: string; expires: number },
+    { apiBaseUrl: getClineApiBaseUrl() },
+    { refreshBufferMs: REFRESH_BUFFER_MS },
+  );
+
+  if (!refreshed) {
+    // Refresh rejected — clear credentials so user re-logins
+    await clearClineAuthSession(userId).catch(() => {});
+    return null;
+  }
+
+  // Persist refreshed credentials so next call starts fresh
+  await saveClineOAuthToken({
+    userId,
+    token: refreshed.access,
+    refreshToken: refreshed.refresh ?? null,
+    expiresAt: refreshed.expires ? new Date(refreshed.expires) : null,
+  }).catch(() => {});
+
+  return refreshed.access;
+}
+
+/**
+ * Decrypt and return the stored Cline OAuth access token for a user, or null
+ * when none is stored / undecryptable. Routes through refresh so an expired
+ * token is renewed before being handed to the SDK.
+ */
+export async function getClineOAuthToken(userId: string): Promise<string | null> {
+  return getValidClineOAuthToken(userId);
 }
 
 /**

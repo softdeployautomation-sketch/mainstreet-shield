@@ -108,6 +108,7 @@ export async function pollClineDeviceAuth(
     await saveClineOAuthToken({
       userId: input.userId,
       token: credentials.access,
+      refreshToken: credentials.refresh ?? null,
       email: credentials.email ?? null,
       expiresAt: credentials.expires ? new Date(credentials.expires) : null,
     });
