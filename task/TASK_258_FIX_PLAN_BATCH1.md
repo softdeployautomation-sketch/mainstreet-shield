@@ -191,4 +191,10 @@ Agent engine, report sheet, attack frameworks, auto-workflow — Batch 2/3.
 | 2026-11-21 | Branch commit + handoff | DONE | Branch `fix/task258-livebugs-batch2`, commit `ad63f48`. Task agent stops and waits for owner/SVE. |
 | 2026-11-21 | SVE verification — BEFORE | DONE | Gates re-run: tsc 0, build 0, prisma validate OK, secrets clean. Diff review found: (a) POST /api/workflows skipped ownership when companyId provided; (b) switchSession stale `sessions` closure (`[]` deps) → title always null on switch; (c) send missing `sessionTitle` dep. |
 | 2026-11-21 | SVE verification — AFTER | DONE | Fixed (a) always verify company ownership + force createdById from session; (b) `switchSession` deps `[sessions]`; (c) `send` deps include `sessionTitle`. Gates re-run PASS. Ready to merge main + push. |
+| 2026-11-21 | Merge Batch 2A to main | DONE | `a12e6bc..2a62f3a` pushed; Build & Deploy green (run 44888637238 + 44888813043). |
+| 2026-11-21 | Master plan v3 + owner Q&A | DONE | Decisions: ARTEX sidecar first · full SSE now · Describe-workflow Lab Console only · SVE runs db push. Promoted `task/TASK_258_MASTER_PLAN_V3.md` (DRAFT removed). |
+| 2026-11-21 | **2B-1 B-6 db push (SVE)** — BEFORE | DONE | SSH VPS OK. Backup `/root/mainstreet_shield.pre-b6.20261121105837.sql.gz` (10792 B; strip `?schema=` for pg_dump). |
+| 2026-11-21 | **2B-1 B-6 db push (SVE)** — AFTER | DONE | `npx prisma db push` = already in sync. Verified `CompanyAssetGroup` + `CompanyAsset.groupId` present. Authed `GET /api/assets` = 200. |
+| 2026-11-21 | **2B-1 assets page still 500 — NEW root cause** | DONE | Page 500 digest `1630408221`: Server Component `assets/page.tsx` has inline `onSubmit` (group create form) + `onClick` (group delete). Not a table issue. Fix scoped as **2B-1b** in Batch 2B handoff. |
+| 2026-11-21 | Batch 2B handoff written | DONE | `task/TASK_258_AGENT_BATCH_2B.md` — 2B-1b..2B-9, exit gates, hard rules. Task Agent starts **2B-1b**. |
 
