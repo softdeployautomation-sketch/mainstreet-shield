@@ -74,8 +74,40 @@ export function AgentChat() {
   }, []);
 
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    let cancelled = false;
+    (async () => {
+      await fetchSessions();
+      // Auto-load the most recent session on mount so conversations survive refresh.
+      if (!cancelled && !sessionId && sessions.length > 0) {
+        const latest = sessions[0]; // already ordered by startedAt desc
+        setSessionId(latest.id);
+        setSessionTitle(latest.title ?? null);
+        try {
+          const res = await fetch(
+            `/api/mss/agent/sessions/${encodeURIComponent(latest.id)}/messages`,
+            { credentials: "same-origin" },
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const msgs: Message[] = (data.messages ?? []).map(
+              (m: any) =>
+                ({
+                  id: m.id ?? Math.random().toString(36),
+                  role: m.role,
+                  content: typeof m.content === "string" ? m.content : "",
+                  thinking: m.thinking,
+                } as Message),
+            );
+            setMessages(msgs);
+          }
+        } catch {
+          // swallow — session list still visible, user can click manually
+        }
+      }
+      cancelled = true;
+    })();
+    return () => { cancelled = true; };
+  }, [fetchSessions, sessionId, sessions]);
 
   // --- fetch saved Cline modelId from settings -----------------------------
 
@@ -279,9 +311,28 @@ export function AgentChat() {
               );
               scrollBottom();
             }
-          } else if (eventType === "thinking") {
+          }
+
+          // Helper: strip raw JSON leaked by Cline SDK when it sends the whole
+          // content_start event as the reasoning string instead of just the text.
+          const cleanReasoning = (raw: string): string => {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed.reasoning === "string") {
+                return parsed.reasoning;
+              }
+              if (parsed && typeof parsed.text === "string") {
+                return parsed.text;
+              }
+            } catch {
+              // not JSON — use as-is
+            }
+            return raw;
+          };
+
+          if (eventType === "thinking") {
             if (typeof p.reasoning === "string" && !p.end) {
-              accumulatedThinking.push(p.reasoning);
+              accumulatedThinking.push(cleanReasoning(p.reasoning));
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
@@ -298,7 +349,7 @@ export function AgentChat() {
               typeof p.reasoning === "string" &&
               !p.end
             ) {
-              accumulatedThinking.push(p.reasoning);
+              accumulatedThinking.push(cleanReasoning(p.reasoning));
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
@@ -331,8 +382,8 @@ export function AgentChat() {
             );
             scrollBottom();
           } else if (eventType === "done") {
-            setMessages((prev) =>
-              prev.map((m) =>
+            setMessages((prev) => {
+              return prev.map((m) =>
                 m.id === assistantId
                   ? {
                       ...m,
@@ -341,8 +392,8 @@ export function AgentChat() {
                       tools: accumulatedTools,
                     }
                   : m,
-              ),
-            );
+              );
+            });
             if (p.sessionId) {
               const newSessionId = p.sessionId;
               setSessionId(newSessionId);
@@ -366,6 +417,20 @@ export function AgentChat() {
             scrollBottom();
           } else if (eventType === "error") {
             setError(p.message || "Chat failed");
+          } else {
+            // Catch-all: unknown event types — try to extract any reasoning text
+            const maybeReasoning = (p as { reasoning?: string; text?: string; content?: string }).reasoning ?? (p as { reasoning?: string; text?: string; content?: string }).text;
+            if (typeof maybeReasoning === "string" && !p.end) {
+              accumulatedThinking.push(cleanReasoning(maybeReasoning));
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, thinking: [...accumulatedThinking] }
+                    : m,
+                ),
+              );
+              scrollBottom();
+            }
           }
         }
       }
@@ -499,31 +564,46 @@ export function AgentChat() {
               </details>
             )}
             {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
-              <div className="ml-0 flex flex-wrap gap-1 max-w-[80%]">
+              <div className="ml-0 flex flex-col gap-1 max-w-[80%]">
                 {msg.tools.map((tool, i) => (
-                  <div
+                  <details
                     key={i}
-                    className="inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-mono border-border bg-bg-elevated/50 text-fg"
+                    className="rounded border border-border bg-bg-elevated/50"
+                    open={!tool.output || tool.isError}
                   >
-                    {tool.output !== undefined ? (
-                      <>
+                    <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 text-[10px] font-mono text-zinc-400 hover:text-fg">
+                      {tool.isError ? (
+                        <span className="text-rose-400">⚠</span>
+                      ) : tool.output !== undefined ? (
                         <span className="text-emerald-400">✓</span>
-                        <span className="text-zinc-300">{tool.toolName}</span>
-                        <span className="text-zinc-400">result:</span>
-                        <span className="truncate max-w-[200px]">
-                          {JSON.stringify(tool.output).slice(0, 100)}
-                        </span>
-                      </>
-                    ) : (
-                      <>
+                      ) : (
                         <span className="text-brand-400">🔧</span>
-                        <span className="text-zinc-300">{tool.toolName}</span>
-                        <span className="text-zinc-400">
-                          {JSON.stringify(tool.input).slice(0, 100)}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                      )}
+                      <span className="text-zinc-300">{tool.toolName}</span>
+                      {tool.isError ? (
+                        <span className="text-rose-400 ml-1">error</span>
+                      ) : tool.output !== undefined ? (
+                        <span className="text-zinc-400 ml-1">result</span>
+                      ) : (
+                        <span className="text-zinc-400 ml-1">call</span>
+                      )}
+                    </summary>
+                    <div className="p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto">
+                      {tool.isError ? (
+                        <>
+                          <div className="text-rose-400 mb-1">{String(tool.output ?? tool.input)}</div>
+                        </>
+                      ) : tool.output !== undefined ? (
+                        <div className="break-words whitespace-pre-wrap">
+                          {JSON.stringify(tool.output, null, 2).slice(0, 500)}
+                        </div>
+                      ) : (
+                        <div className="break-words whitespace-pre-wrap">
+                          {JSON.stringify(tool.input, null, 2).slice(0, 500)}
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 ))}
               </div>
             )}

@@ -7,6 +7,8 @@ const assetSchema = z.object({
   target: z.string().min(1, "Target is required"),
   type: z.enum(["web", "api", "network", "mobile"]).default("web"),
   name: z.string().optional(),
+  inScope: z.boolean().optional(),
+  groupId: z.string().optional(),
 });
 
 // GET /api/assets — list assets for the user's company
@@ -77,14 +79,18 @@ export async function POST(req: Request) {
     const body = await req.json();
     const data = assetSchema.parse(body);
 
+    const createData: any = {
+      company: { connect: { id: company.id } },
+      name: data.name ?? "",
+      type: data.type,
+      target: data.target,
+      inScope: data.inScope ?? true,
+    };
+    if (data.groupId !== undefined) {
+      createData.groupId = data.groupId;
+    }
     const asset = await db.companyAsset.create({
-      data: {
-        company: { connect: { id: company.id } },
-        name: data.name ?? "",
-        type: data.type,
-        target: data.target,
-        inScope: true,
-      },
+      data: createData,
     });
 
     return NextResponse.json({ ok: true, asset }, { status: 201 });
