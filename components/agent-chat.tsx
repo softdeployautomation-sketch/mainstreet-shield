@@ -2,11 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+interface ToolCall {
+  toolName: string;
+  input?: unknown;
+  output?: unknown;
+  isError?: boolean;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   thinking?: string[];
+  tools?: ToolCall[];
 }
 
 interface PendingFile {
@@ -336,6 +344,35 @@ export function AgentChat() {
                   ))}
                 </div>
               </details>
+            )}
+            {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
+              <div className="ml-0 flex flex-wrap gap-1 max-w-[80%]">
+                {msg.tools.map((tool, i) => (
+                  <div
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-mono border-border bg-bg-elevated/50 text-fg"
+                  >
+                    {tool.output !== undefined ? (
+                      <>
+                        <span className="text-emerald-400">✓</span>
+                        <span className="text-zinc-300">{tool.toolName}</span>
+                        <span className="text-zinc-400">result:</span>
+                        <span className="truncate max-w-[200px]">
+                          {JSON.stringify(tool.output).slice(0, 100)}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-brand-400">🔧</span>
+                        <span className="text-zinc-300">{tool.toolName}</span>
+                        <span className="text-zinc-400">
+                          {JSON.stringify(tool.input).slice(0, 100)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
             <div
               className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${

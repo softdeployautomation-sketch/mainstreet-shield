@@ -389,11 +389,19 @@ export async function readClineMessages(sessionId: string): Promise<MessageWithM
 // string[]`, so we normalize server-side before the JSON response.
 // ---------------------------------------------------------------------------
 
+export interface ToolCall {
+  toolName: string;
+  input?: unknown;
+  output?: unknown;
+  isError?: boolean;
+}
+
 export interface ClineUiMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   thinking: string[];
+  tools: ToolCall[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -428,6 +436,7 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
 
   const texts: string[] = [];
   const thinking: string[] = [];
+  const tools: ToolCall[] = [];
   const parts: unknown[] =
     typeof inner.content === "string"
       ? [{ type: "text", text: inner.content }]
@@ -445,18 +454,30 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
     } else if (type === "thinking" || type === "reasoning") {
       const value = part.thinking ?? part.text;
       if (typeof value === "string" && value.trim()) thinking.push(value);
+    } else if (type === "tool-call" || type === "tool_use" || type === "tool-call-delta") {
+      tools.push({
+        toolName: String(part.toolName ?? part.name ?? "tool"),
+        input: part.input ?? part.args ?? part.arguments,
+      });
+    } else if (type === "tool-result" || type === "tool_result") {
+      tools.push({
+        toolName: String(part.toolName ?? part.name ?? "tool"),
+        output: part.output ?? part.content ?? part.result,
+        isError: part.isError === true,
+      });
     } else if (typeof part.text === "string" && part.text.trim()) {
       texts.push(role === "user" ? stripUserInput(part.text) : part.text);
     }
   }
 
-  if (texts.length === 0 && thinking.length === 0) return null;
+  if (texts.length === 0 && thinking.length === 0 && tools.length === 0) return null;
 
   return {
     id: typeof m.id === "string" ? m.id : randomUUID(),
     role,
     content: texts.join("\n\n"),
     thinking,
+    tools,
   };
 }
 
