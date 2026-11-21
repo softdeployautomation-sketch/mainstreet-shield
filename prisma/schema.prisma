@@ -34,6 +34,7 @@ model User {
   workflows         Workflow[]
   contextDocSteps   ContextDocStep[]
   mssAgentSessions  MssAgentSession[]
+  agentFindings     AgentFinding[]
   userSettings      UserSettings?
   clineAuthSession  ClineAuthSession?
 }
@@ -97,6 +98,7 @@ model Company {
   assets CompanyAsset[]
   groups CompanyAssetGroup[]
   workflows Workflow[]
+  agentFindings AgentFinding[]
 }
 
 // Assets a company wants secured / tested
@@ -113,6 +115,7 @@ model CompanyAsset {
 
   company  Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   group    CompanyAssetGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  agentFindings AgentFinding[]
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +149,7 @@ model Workflow {
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdBy User      @relation(fields: [createdById], references: [id])
   steps     WorkflowStep[]
+  agentFindings AgentFinding[]
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +167,7 @@ model WorkflowStep {
   createdAt   DateTime @default(now())
 
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  agentFindings AgentFinding[]
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +295,40 @@ model ContextDocStep {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// AgentFinding — evidence store for every attack the MSS Agent performs.
+// NOT ARTEX-only: stores SSH creds, screenshots, scan output, proof of exploit
+// for ALL agent actions. Human-gated: agent creates with status "open",
+// human reviews and sets "reviewed"/"closed" + note before agent can pivot.
+// ---------------------------------------------------------------------------
+model AgentFinding {
+  id          String   @id @default(cuid())
+  companyId   String
+  userId      String    // who created (agent or human)
+  assetId     String?   // linked CompanyAsset if applicable
+  workflowId  String?   // linked Workflow if applicable
+  stepId      String?   // linked WorkflowStep if applicable
+  title       String    // e.g. "SSH access gained on web-01"
+  accessType  String    // ssh | http | database | command | other
+  target      String    // host, IP, URL, or command
+  credentials Json?     // encrypted: { username, password, key, port, ... } AES-GCM
+  evidence    Json?     // proof: screenshot base64, scan output, CVE refs, logs
+  status      String    @default("open") // open | reviewed | closed | active
+  humanNote   String?   // admin reviewer note
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset   CompanyAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  workflow Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  step    WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([status])
 }
 
 // ---------------------------------------------------------------------------

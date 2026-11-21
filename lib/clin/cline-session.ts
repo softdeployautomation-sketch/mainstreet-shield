@@ -262,6 +262,9 @@ Enabled Cline tools: shell, file, search, web. You may use these tools to inspec
 MSS-specific tools:
 - list_assets — Returns all security assets owned by the user's company (id, name, type, target, inScope, groupId). Use when the user asks about their assets, inventory, or scope.
 - list_workflows — Returns all workflows owned by the user's company (id, name, step count, status). Use when the user asks about their workflows, automations, or scan routines.
+- save_workflow — Creates a new workflow owned by the user's company. Input: { name: string, steps: Array<{ name: string, tool?: string, target?: string, order?: number }> }. Returns the created workflow with id + steps. Use when the user asks to create, build, or describe a new workflow.
+- list_findings — Returns all attack evidence findings owned by the user's company (id, title, accessType, target, status, humanNote). Use when the user asks about past findings, credentials, or proof of access.
+- create_finding — Stores attack evidence for a completed action. Input: { title, accessType: "ssh"|"http"|"database"|"command"|"other", target, credentials?, evidence?, assetId?, workflowId?, stepId? }. Use after gaining access (SSH, HTTP, etc.) to record proof for human review.
 
 Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
@@ -327,6 +330,194 @@ export function mssTools(userId: string): AgentTool[] {
             stepCount: w.steps.length,
             status: w.status,
           })),
+        };
+      },
+    },
+    {
+      name: "save_workflow",
+      description:
+        "Create a new workflow owned by the authenticated user's company. Input: { name, steps: [{ name, tool?, target?, order? }] }. Returns the created workflow id, name, and steps.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Workflow name" },
+          steps: {
+            type: "array",
+            description: "Ordered list of workflow steps",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                tool: { type: "string" },
+                target: { type: "string" },
+                order: { type: "number" },
+              },
+              required: ["name"],
+            },
+          },
+        },
+        required: ["name", "steps"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { name, steps } = input as { name: string; steps?: Array<{ name: string; tool?: string; target?: string; order?: number }> };
+        const company = await db.company.findUnique({
+          where: { userId },
+        });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const workflow = await db.workflow.create({
+          data: {
+            companyId: company.id,
+            createdById: userId,
+            name,
+            description: null,
+            steps:
+              steps?.length
+                ? {
+                    create: steps.map((s, i) => ({
+                      name: s.name,
+                      order: s.order ?? i,
+                      tool: s.tool ?? null,
+                      target: s.target ?? null,
+                      status: "pending",
+                    })),
+                  }
+                : undefined,
+          },
+          include: { steps: { orderBy: { order: "asc" } } },
+        });
+
+        return {
+          ok: true,
+          workflow: {
+            id: workflow.id,
+            name: workflow.name,
+            status: workflow.status,
+            steps: workflow.steps.map((s) => ({
+              id: s.id,
+              name: s.name,
+              tool: s.tool,
+              target: s.target,
+              order: s.order,
+              status: s.status,
+            })),
+          },
+        };
+      },
+    },
+    {
+      name: "list_findings",
+      description:
+        "List all attack evidence findings owned by the authenticated user's company. Returns id, title, accessType, target, status, humanNote.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const company = await db.company.findUnique({
+          where: { userId },
+          include: {
+            agentFindings: {
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        });
+        return {
+          findings: (company?.agentFindings ?? []).map((f: { id: string; title: string; accessType: string; target: string; status: string; humanNote: string | null }) => ({
+            id: f.id,
+            title: f.title,
+            accessType: f.accessType,
+            target: f.target,
+            status: f.status,
+            humanNote: f.humanNote,
+          })),
+        };
+      },
+    },
+    {
+      name: "create_finding",
+      description:
+        "Store attack evidence for a completed action. Input: { title, accessType: 'ssh'|'http'|'database'|'command'|'other', target, credentials?, evidence?, assetId?, workflowId?, stepId? }. Use after gaining access to record proof for human review.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Finding title" },
+          accessType: {
+            type: "string",
+            description: "ssh | http | database | command | other",
+          },
+          target: { type: "string", description: "Host, IP, URL, or command" },
+          credentials: {
+            type: "object",
+            description: "Encrypted credentials (AES-GCM)",
+          },
+          evidence: {
+            type: "object",
+            description: "Proof: screenshots, scan output, logs",
+          },
+          assetId: { type: "string", description: "Linked CompanyAsset id" },
+          workflowId: { type: "string", description: "Linked Workflow id" },
+          stepId: { type: "string", description: "Linked WorkflowStep id" },
+        },
+        required: ["title", "accessType", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const {
+          title,
+          accessType,
+          target,
+          credentials,
+          evidence,
+          assetId,
+          workflowId,
+          stepId,
+        } = input as {
+          title: string;
+          accessType: string;
+          target: string;
+          credentials?: unknown;
+          evidence?: unknown;
+          assetId?: string;
+          workflowId?: string;
+          stepId?: string;
+        };
+        const company = await db.company.findUnique({
+          where: { userId },
+        });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const finding = await db.agentFinding.create({
+          data: {
+            companyId: company.id,
+            userId,
+            title,
+            accessType,
+            target,
+            credentials: (credentials ?? null) as any,
+            evidence: (evidence ?? null) as any,
+            assetId: assetId ?? null,
+            workflowId: workflowId ?? null,
+            stepId: stepId ?? null,
+            status: "open",
+          },
+        });
+
+        return {
+          ok: true,
+          finding: {
+            id: finding.id,
+            title: finding.title,
+            accessType: finding.accessType,
+            target: finding.target,
+            status: finding.status,
+          },
         };
       },
     },
