@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { ShieldVmPanel } from "@/components/shield-vm-panel";
 import { AgentChat } from "@/components/agent-chat";
 import { WorkflowBuilder } from "@/components/workflow-builder";
+import { DescribeWorkflowForm } from "@/components/describe-workflow-form";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +113,10 @@ export default async function ShieldPage() {
 
                 <div className="mt-6 rounded border border-border bg-bg-elevated p-4">
                   <WorkflowBuilder />
+                </div>
+
+                <div className="mt-6 rounded border border-border bg-bg-elevated p-4">
+                  <DescribeWorkflowForm />
                 </div>
               </div>
             )}

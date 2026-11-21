@@ -22,7 +22,6 @@ interface Workflow {
 
 export function WorkflowBuilder() {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [generating, setGenerating] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -48,42 +47,6 @@ export function WorkflowBuilder() {
   useEffect(() => {
     fetchWorkflows();
   }, [fetchWorkflows]);
-
-  const generate = useCallback(async () => {
-    setError("");
-    setGenerating(true);
-    try {
-      const steps = [
-        { name: "Define assessment scope and objectives", tool: "manual" },
-        { name: "Confirm current execution context", tool: "shell" },
-      ];
-      const res = await fetch("/api/workflows", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `Workflow ${new Date().toISOString().slice(5, 16)}`,
-          steps: steps.map((s, i) => ({ name: s.name, tool: s.tool })),
-        }),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        if (errData.error === "company_not_found") {
-          setError(
-            "No company found. Create a company first at /company."
-          );
-          return;
-        }
-        throw new Error(errData.error || "Failed to generate workflow");
-      }
-      const data = await res.json();
-      setWorkflows((prev) => [data.workflow, ...prev]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate workflow");
-    } finally {
-      setGenerating(false);
-    }
-  }, []);
 
   const startRename = (id: string, currentName: string) => {
     setRenaming(id);
@@ -145,17 +108,10 @@ export function WorkflowBuilder() {
         <div>
           <h2 className="text-lg font-display font-bold text-fg">Workflow Builder</h2>
           <p className="text-sm text-fg-muted">
-            Generate a workflow JSON file with an embedded systemPrompt so another
-            agent can read and update it. Framework: <span className="font-mono">mss-agent-v1</span>.
+            View, rename, and manage workflows owned by your company. To create a new workflow, describe it
+            in Lab Console (/shield) or edit details on the workflow page.
           </p>
         </div>
-        <button
-          onClick={generate}
-          disabled={generating}
-          className="rounded bg-brand-600 px-4 py-2 text-sm font-mono font-bold text-white disabled:opacity-60 hover:!bg-brand-500 disabled:hover:!bg-brand-600"
-        >
-          {generating ? "Generating…" : "Generate Workflow"}
-        </button>
       </div>
 
       {error && (
