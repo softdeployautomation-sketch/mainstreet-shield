@@ -21,6 +21,8 @@
 | 2026-11-21 | **F-1 Cline login** — AFTER | DONE | NEW `lib/clin/config.ts` + `lib/clin/device-auth.ts`; connect/poll rewritten to real WorkOS flow; modal handles 202-pending + auto-poll. First build FAILED (37 Turbopack errors: `@cline/llms` browser build) → fixed by adding `@cline/*` to `serverExternalPackages` in `next.config.ts` (same as spaceworker). Build then exit 0. |
 | 2026-11-21 | Gates G-1..G-4 | PASS | G-1 `tsc` 0 · G-2 `npm run build` 0 ✓ · G-3 `prisma validate` valid · G-4 no secrets in diff (`process.env.BUILD_TARGET` is pre-existing config, not a secret). |
 | 2026-11-21 | Branch commit + handoff | DONE | Branch `fix/task258-batch1` (see `git log` for tip). Next: owner merges → dispatches "Build & Deploy" → live verify V-4/V-5/V-6. |
+| 2026-11-21 | Models list live (owner follow-up) — BEFORE | DONE | Owner: dropdown shows placeholders; port spaceworker `fetchClineRecommendedModels` + add paid tier option. Plan: rewrite `free-models` route (free + paid from recommended/clinePass), settings card optgroups + "Show paid" toggle. |
+| 2026-11-21 | Models list live (owner follow-up) — AFTER | DONE | Route uses `getCachedClineRecommendedModels()` → `{free, paid, models}`; card: Free tier optgroup + "Show paid models" checkbox (recommended/clinePass/clineCloud). `tsc` 0 · `next build` 0. Merged to main + pushed for deploy. |
 
 ---
 

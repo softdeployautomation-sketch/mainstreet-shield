@@ -36,8 +36,11 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
   // Cline OAuth login status
   const [auth, setAuth] = useState<ClineAuth | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  // Free models dropdown (loaded live from API)
+  // Model lists loaded live from API (free tier + paid/recommended)
   const [freeModels, setFreeModels] = useState<FreeModel[]>([]);
+  const [paidModels, setPaidModels] = useState<FreeModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [showPaid, setShowPaid] = useState(false);
   // Device code login modal
   const [modalOpen, setModalOpen] = useState(false);
   const [modalData, setModalData] = useState<{
@@ -86,17 +89,22 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch free Cline models for the dropdown (loaded live from API)
+  // Fetch free + paid Cline models for the dropdown (loaded live from API)
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoadingModels(true);
       try {
-        const res = await fetch("/api/clin/auth/free-models", { credentials: "same-origin" });
+        const res = await fetch("/api/clin/auth/free-models", { credentials: "same-origin", cache: "no-store" });
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        setFreeModels(Array.isArray(data.models) ? data.models : []);
+        if (cancelled) return;
+        setFreeModels(Array.isArray(data.free) ? data.free : Array.isArray(data.models) ? data.models : []);
+        setPaidModels(Array.isArray(data.paid) ? data.paid : []);
       } catch {
         // swallow; dropdown simply shows empty
+      } finally {
+        if (!cancelled) setLoadingModels(false);
       }
     })();
     return () => { cancelled = true; };
@@ -229,27 +237,55 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
           <p className="mt-2 text-xs text-red-600 dark:text-red-400">{connectError}</p>
         )}
 
-        {/* Free models dropdown (loaded live from API) */}
+        {/* Model dropdown — free tier always; paid/recommended behind a toggle */}
         <div className="mt-4 flex flex-col gap-2">
-          <label className="block text-xs font-mono text-fg-muted">Free Cline model (optional)</label>
+          <label className="block text-xs font-mono text-fg-muted">Cline model (optional)</label>
           <select
-            value={modelId && freeModels.some((m) => m.id === modelId) ? modelId : ""}
+            value={
+              modelId && (freeModels.some((m) => m.id === modelId) || paidModels.some((m) => m.id === modelId))
+                ? modelId
+                : ""
+            }
             onChange={(e) => {
               const val = e.target.value;
               if (val) setModelId(val);
             }}
-            disabled={saving}
+            disabled={saving || loadingModels}
             className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
           >
-            <option value="">Select a free model…</option>
-            {freeModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} — {m.description}
-              </option>
-            ))}
+            <option value="">
+              {loadingModels ? "Loading models…" : "Select a model…"}
+            </option>
+            {freeModels.length > 0 && (
+              <optgroup label="Free tier">
+                {freeModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} — {m.description}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {showPaid && paidModels.length > 0 && (
+              <optgroup label="Paid / recommended (Cline Pass)">
+                {paidModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} — {m.description}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
-          {freeModels.length === 0 && (
-            <p className="text-xs text-fg-muted">Free models unavailable — enter a model ID manually below.</p>
+          <label className="flex items-center gap-2 text-xs text-fg-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showPaid}
+              onChange={(e) => setShowPaid(e.target.checked)}
+              className="rounded border-border"
+            />
+            Show paid models (Cline Pass / recommended) — for paid Cline users
+          </label>
+          {!loadingModels && freeModels.length === 0 && paidModels.length === 0 && (
+            <p className="text-xs text-fg-muted">Models unavailable — enter a model ID manually below.</p>
           )}
         </div>
 
