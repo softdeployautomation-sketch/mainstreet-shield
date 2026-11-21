@@ -189,19 +189,45 @@ export function WorkflowBuilder() {
                     {wf.name}
                   </a>
                   <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => startRename(wf.id, wf.name)}
-                      className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
-                    >
-                      Rename
-                    </button>
-                    <button
-                      onClick={() => confirmDelete(wf.id)}
-                      disabled={deleting === wf.id}
-                      className="rounded border border-rose-500/40 bg-white px-2 py-1 text-[10px] font-mono text-rose-400 hover:bg-rose-900/20 disabled:opacity-60"
-                    >
-                      Delete
-                    </button>
+                    {renaming === wf.id ? (
+                      <>
+                        <input
+                          type="text"
+                          defaultValue={wf.name}
+                          className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg"
+                          onChange={(e) => setNewName(e.target.value)}
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => saveRename(wf.id)}
+                          className="rounded border border-brand-600 bg-brand-600 px-2 py-1 text-[10px] font-mono text-white hover:!bg-brand-500"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={cancelRename}
+                          className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => startRename(wf.id, wf.name)}
+                          className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
+                        >
+                          Rename
+                        </button>
+                        <button
+                          onClick={() => confirmDelete(wf.id)}
+                          disabled={deleting === wf.id}
+                          className="rounded border border-rose-500/40 bg-white px-2 py-1 text-[10px] font-mono text-rose-400 hover:bg-rose-900/20 disabled:opacity-60"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-[10px] text-fg-muted font-mono">
