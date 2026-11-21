@@ -190,7 +190,7 @@ export async function startClineSession(
   const cwd = join(process.cwd(), `mss-agent-sessions/${sessionId}`);
   mkdirSync(cwd, { recursive: true });
 
-  const modelId = input.modelId ?? creds.modelId ?? "claude-sonnet-4-20250514";
+  const modelId = input.modelId ?? creds.modelId ?? "anthropic/claude-sonnet-4-20250514";
 
   const unsubscribe = core.subscribe((_event: CoreSessionEvent) => {
     // Live event feed captured server-side; the transcript is read after the turn.
