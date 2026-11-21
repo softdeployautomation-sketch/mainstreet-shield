@@ -78,31 +78,45 @@ export function AgentChat() {
     (async () => {
       await fetchSessions();
       // Auto-load the most recent session on mount so conversations survive refresh.
-      if (!cancelled && !sessionId && sessions.length > 0) {
-        const latest = sessions[0]; // already ordered by startedAt desc
-        setSessionId(latest.id);
-        setSessionTitle(latest.title ?? null);
-        try {
-          const res = await fetch(
-            `/api/mss/agent/sessions/${encodeURIComponent(latest.id)}/messages`,
-            { credentials: "same-origin" },
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const msgs: Message[] = (data.messages ?? []).map(
-              (m: any) =>
-                ({
-                  id: m.id ?? Math.random().toString(36),
-                  role: m.role,
-                  content: typeof m.content === "string" ? m.content : "",
-                  thinking: m.thinking,
-                } as Message),
+      // Preference: stored session (localStorage) > sessions from DB.
+      // If fetchSessions() failed (e.g. auth), stored session can still load directly.
+      const storedSession = typeof localStorage !== "undefined"
+        ? localStorage.getItem("mss_last_session")
+        : null;
+      let targetId: string | null = null;
+      let targetTitle: string | null = null;
+      if (storedSession && !sessionId) {
+        targetId = storedSession;
+        const found = sessions.find((s) => s.id === storedSession);
+        targetTitle = found?.title ?? null;
+      } else if (!sessionId && sessions.length > 0) {
+        targetId = sessions[0].id;
+        targetTitle = sessions[0].title ?? null;
+      }
+      if (!cancelled && targetId) {
+          setSessionId(targetId);
+          setSessionTitle(targetTitle);
+          try {
+            const res = await fetch(
+              `/api/mss/agent/sessions/${encodeURIComponent(targetId)}/messages`,
+              { credentials: "same-origin" },
             );
-            setMessages(msgs);
+            if (res.ok) {
+              const data = await res.json();
+              const msgs: Message[] = (data.messages ?? []).map(
+                (m: any) =>
+                  ({
+                    id: m.id ?? Math.random().toString(36),
+                    role: m.role,
+                    content: typeof m.content === "string" ? m.content : "",
+                    thinking: m.thinking,
+                  } as Message),
+              );
+              setMessages(msgs);
+            }
+          } catch {
+            // swallow — session list still visible, user can click manually
           }
-        } catch {
-          // swallow — session list still visible, user can click manually
-        }
       }
       cancelled = true;
     })();
@@ -315,6 +329,8 @@ export function AgentChat() {
 
           // Helper: strip raw JSON leaked by Cline SDK when it sends the whole
           // content_start event as the reasoning string instead of just the text.
+          // Returns empty string for raw JSON objects that carry no readable text,
+          // so empty thinking blocks don't render.
           const cleanReasoning = (raw: string): string => {
             try {
               const parsed = JSON.parse(raw);
@@ -324,23 +340,28 @@ export function AgentChat() {
               if (parsed && typeof parsed.text === "string") {
                 return parsed.text;
               }
+              // JSON object with no readable text — suppress
+              return "";
             } catch {
-              // not JSON — use as-is
+              // not JSON — use as-is, but trim whitespace
+              return raw.trim();
             }
-            return raw;
           };
 
           if (eventType === "thinking") {
             if (typeof p.reasoning === "string" && !p.end) {
-              accumulatedThinking.push(cleanReasoning(p.reasoning));
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, thinking: [...accumulatedThinking] }
-                    : m,
-                ),
-              );
-              scrollBottom();
+              const cleaned = cleanReasoning(p.reasoning);
+              if (cleaned.trim()) {
+                accumulatedThinking.push(cleaned);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, thinking: [...accumulatedThinking] }
+                      : m,
+                  ),
+                );
+                scrollBottom();
+              }
             }
           } else if (eventType === "content_start") {
             // T2: server sends content_start with { contentType: "reasoning", reasoning: "..." }
@@ -349,15 +370,18 @@ export function AgentChat() {
               typeof p.reasoning === "string" &&
               !p.end
             ) {
-              accumulatedThinking.push(cleanReasoning(p.reasoning));
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, thinking: [...accumulatedThinking] }
-                    : m,
-                ),
-              );
-              scrollBottom();
+              const cleaned = cleanReasoning(p.reasoning);
+              if (cleaned.trim()) {
+                accumulatedThinking.push(cleaned);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, thinking: [...accumulatedThinking] }
+                      : m,
+                  ),
+                );
+                scrollBottom();
+              }
             }
           } else if (eventType === "iteration_start") {
             // T2: ignore — no UI output needed
@@ -397,6 +421,7 @@ export function AgentChat() {
             if (p.sessionId) {
               const newSessionId = p.sessionId;
               setSessionId(newSessionId);
+              try { localStorage.setItem("mss_last_session", newSessionId); } catch {}
               // T1: append new session to local list, dedupe by id
               setSessions((prev) => {
                 if (prev.some((s) => s.id === newSessionId)) return prev;
@@ -421,15 +446,18 @@ export function AgentChat() {
             // Catch-all: unknown event types — try to extract any reasoning text
             const maybeReasoning = (p as { reasoning?: string; text?: string; content?: string }).reasoning ?? (p as { reasoning?: string; text?: string; content?: string }).text;
             if (typeof maybeReasoning === "string" && !p.end) {
-              accumulatedThinking.push(cleanReasoning(maybeReasoning));
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, thinking: [...accumulatedThinking] }
-                    : m,
+              const cleaned = cleanReasoning(maybeReasoning);
+              if (cleaned.trim()) {
+                accumulatedThinking.push(cleaned);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, thinking: [...accumulatedThinking] }
+                      : m,
                 ),
               );
               scrollBottom();
+              }
             }
           }
         }
@@ -442,9 +470,9 @@ export function AgentChat() {
   }, [input, sending, sessionId, pendingFiles, modelId, sessionTitle]);
 
   const scrollBottom = () => {
-    setTimeout(() => {
-      endRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 0);
+    if (endRef.current) {
+      endRef.current.scrollTop = endRef.current.scrollHeight;
+    }
   };
   useEffect(() => {
     scrollBottom();
@@ -564,48 +592,32 @@ export function AgentChat() {
               </details>
             )}
             {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
-              <div className="ml-0 flex flex-col gap-1 max-w-[80%]">
-                {msg.tools.map((tool, i) => (
-                  <details
-                    key={i}
-                    className="rounded border border-border bg-bg-elevated/50"
-                    open={!tool.output || tool.isError}
-                  >
-                    <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 text-[10px] font-mono text-zinc-400 hover:text-fg">
-                      {tool.isError ? (
-                        <span className="text-rose-400">⚠</span>
-                      ) : tool.output !== undefined ? (
-                        <span className="text-emerald-400">✓</span>
-                      ) : (
-                        <span className="text-brand-400">🔧</span>
-                      )}
-                      <span className="text-zinc-300">{tool.toolName}</span>
-                      {tool.isError ? (
-                        <span className="text-rose-400 ml-1">error</span>
-                      ) : tool.output !== undefined ? (
-                        <span className="text-zinc-400 ml-1">result</span>
-                      ) : (
-                        <span className="text-zinc-400 ml-1">call</span>
-                      )}
-                    </summary>
-                    <div className="p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto">
-                      {tool.isError ? (
-                        <>
-                          <div className="text-rose-400 mb-1">{String(tool.output ?? tool.input)}</div>
-                        </>
-                      ) : tool.output !== undefined ? (
-                        <div className="break-words whitespace-pre-wrap">
-                          {JSON.stringify(tool.output, null, 2).slice(0, 500)}
-                        </div>
-                      ) : (
-                        <div className="break-words whitespace-pre-wrap">
-                          {JSON.stringify(tool.input, null, 2).slice(0, 500)}
-                        </div>
-                      )}
+              <details className="ml-0 flex flex-col gap-1 max-w-[80%]">
+                <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 rounded border border-border bg-bg-elevated/50 text-[10px] font-mono text-zinc-400 hover:text-fg">
+                  <span className="w-1 h-1 rounded-full bg-zinc-500" />
+                  <span className="uppercase tracking-wider">Tool calls</span>
+                  <span className="ml-auto text-[10px] text-zinc-500">{msg.tools.length} call{msg.tools.length !== 1 ? "s" : ""}</span>
+                </summary>
+                <div className="rounded border border-border bg-bg-elevated/50 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto space-y-2">
+                  {msg.tools.map((tool, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <span className="w-[16px] text-[10px]">
+                        {tool.isError ? "⚠" : tool.output !== undefined ? "✓" : "🔧"}
+                      </span>
+                      <div className="flex-1">
+                        <div className="font-mono text-zinc-400 mb-0.5">{tool.toolName}</div>
+                        {tool.isError ? (
+                          <div className="text-rose-400">{String(tool.output ?? tool.input)}</div>
+                        ) : tool.output !== undefined ? (
+                          <div className="break-words whitespace-pre-wrap text-zinc-300">{JSON.stringify(tool.output, null, 2).slice(0, 500)}</div>
+                        ) : (
+                          <div className="break-words whitespace-pre-wrap text-zinc-400">{JSON.stringify(tool.input, null, 2).slice(0, 500)}</div>
+                        )}
+                      </div>
                     </div>
-                  </details>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </details>
             )}
             <div
               className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${
