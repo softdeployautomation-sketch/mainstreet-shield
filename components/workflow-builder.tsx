@@ -1,50 +1,143 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface WorkflowStep {
-  tool: string;
-  target: string;
-  params: Record<string, unknown>;
-  description: string;
-  reasoning: string;
+  id?: string;
+  name: string;
+  tool?: string | null;
+  target?: string | null;
+  order?: number;
 }
 
 interface Workflow {
   id: string;
   name: string;
+  description: string | null;
+  status: string;
   createdAt: string;
   updatedAt: string;
-  systemPrompt: string;
   steps: WorkflowStep[];
-  framework: string;
 }
 
 export function WorkflowBuilder() {
-  const [workflow, setWorkflow] = useState<Workflow | null>(null);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [generating, setGenerating] = useState(false);
-  const [showJson, setShowJson] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
+
+  const fetchWorkflows = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workflows", {
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        setError(`Failed to load workflows (${res.status})`);
+        return;
+      }
+      const data = await res.json();
+      setWorkflows(data.workflows ?? []);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load workflows");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWorkflows();
+  }, [fetchWorkflows]);
 
   const generate = useCallback(async () => {
     setError("");
     setGenerating(true);
     try {
-      const res = await fetch("/api/mss/agent/workflow", {
+      const steps = [
+        { name: "Define assessment scope and objectives", tool: "manual" },
+        { name: "Confirm current execution context", tool: "shell" },
+      ];
+      const res = await fetch("/api/workflows", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          name: `Workflow ${new Date().toISOString().slice(5, 16)}`,
+          steps: steps.map((s, i) => ({ name: s.name, tool: s.tool })),
+        }),
       });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to generate workflow");
-      const data = (await res.json()) as Workflow;
-      setWorkflow(data);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        if (errData.error === "company_not_found") {
+          setError(
+            "No company found. Create a company first at /company."
+          );
+          return;
+        }
+        throw new Error(errData.error || "Failed to generate workflow");
+      }
+      const data = await res.json();
+      setWorkflows((prev) => [data.workflow, ...prev]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate workflow");
     } finally {
       setGenerating(false);
     }
   }, []);
+
+  const startRename = (id: string, currentName: string) => {
+    setRenaming(id);
+    setNewName(currentName);
+    setError("");
+  };
+
+  const cancelRename = () => {
+    setRenaming(null);
+    setNewName("");
+  };
+
+  const saveRename = async (id: string) => {
+    setRenaming(null);
+    const name = newName.trim();
+    if (!name) {
+      cancelRename();
+      return;
+    }
+    setNewName("");
+    try {
+      const res = await fetch(`/api/workflows/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error("Rename failed");
+      setWorkflows((prev) =>
+        prev.map((w) => (w.id === id ? { ...w, name } : w))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rename failed");
+      setRenaming(id);
+      setNewName(name);
+    }
+  };
+
+  const confirmDelete = async (id: string) => {
+    if (!window.confirm("Delete this workflow?")) return;
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/workflows/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      setWorkflows((prev) => prev.filter((w) => w.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -71,72 +164,76 @@ export function WorkflowBuilder() {
         </div>
       )}
 
-      {workflow && (
-        <>
-          <div className="rounded-xl border border-border bg-bg-elevated p-4">
-            <div className="flex flex-wrap gap-2 mb-3">
-              <span className="text-xs font-mono text-fg-muted">ID</span>
-              <span className="text-xs font-mono text-fg">{workflow.id}</span>
-              <span className="text-xs font-mono text-fg-muted">Framework</span>
-              <span className="text-xs font-mono text-brand-400">{workflow.framework}</span>
-              <span className="text-xs font-mono text-fg-muted">Created</span>
-              <span className="text-xs font-mono text-fg">{new Date(workflow.createdAt).toLocaleString()}</span>
-              <span className="text-xs font-mono text-fg-muted">Updated</span>
-              <span className="text-xs font-mono text-fg">{new Date(workflow.updatedAt).toLocaleString()}</span>
+      <div className="border border-border rounded-xl bg-bg-elevated">
+        <div className="border-b border-border p-4">
+          <h3 className="text-sm font-mono font-bold text-fg">
+            Saved Workflows
+          </h3>
+        </div>
+        <div className="divide-y divide-border">
+          {workflows.length === 0 ? (
+            <div className="px-4 py-6 text-xs text-fg-muted italic text-center">
+              No saved workflows yet. Click "Generate Workflow" to create one.
             </div>
-
-            <div className="mb-3">
-              <label className="block text-xs font-mono text-fg-muted mb-1">Name</label>
-              <p className="text-sm text-fg font-mono">{workflow.name}</p>
-            </div>
-
-            <div className="mb-3">
-              <label className="block text-xs font-mono text-fg-muted mb-1">
-                systemPrompt (instructions for another agent to update this workflow)
-              </label>
-              <div className="rounded border border-border bg-white p-3 text-xs text-fg font-mono leading-relaxed max-h-64 overflow-y-auto">
-                {workflow.systemPrompt}
-              </div>
-            </div>
-
-            <div className="mb-3">
-              <label className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-mono text-fg-muted">Steps</span>
-                <span className="text-xs text-fg-muted">({workflow.steps.length})</span>
-              </label>
-              <div className="space-y-1">
-                {workflow.steps.map((step, i) => (
-                  <div key={i} className="rounded border border-border bg-white p-2">
-                    <div className="flex flex-wrap gap-2 mb-1">
-                      <span className="text-[10px] font-mono text-brand-400 uppercase tracking-wider">{step.tool}</span>
-                      <span className="text-[10px] font-mono text-fg-muted">{step.target}</span>
-                    </div>
-                    <div className="text-xs text-fg">{step.description}</div>
-                    <div className="text-[10px] text-fg-muted font-mono mt-1">Reasoning: {step.reasoning}</div>
-                    {step.params && Object.keys(step.params).length > 0 && (
-                      <div className="text-[10px] text-fg-muted font-mono mt-1">Params: {JSON.stringify(step.params)}</div>
-                    )}
+          ) : (
+            workflows.map((wf) => (
+              <div
+                key={wf.id}
+                className="px-4 py-3 hover:bg-white/5 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <a
+                    href={`/dashboard/workflows/${wf.id}`}
+                    className="font-mono truncate text-fg hover:text-brand-400"
+                  >
+                    {wf.name}
+                  </a>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => startRename(wf.id, wf.name)}
+                      className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      onClick={() => confirmDelete(wf.id)}
+                      disabled={deleting === wf.id}
+                      className="rounded border border-rose-500/40 bg-white px-2 py-1 text-[10px] font-mono text-rose-400 hover:bg-rose-900/20 disabled:opacity-60"
+                    >
+                      Delete
+                    </button>
                   </div>
-                ))}
+                </div>
+                <div className="flex items-center gap-3 text-[10px] text-fg-muted font-mono">
+                  <span>
+                    {wf.steps.length} step{ wf.steps.length !== 1 ? "s" : "" }
+                  </span>
+                  <span>·</span>
+                  <span>{wf.status}</span>
+                  <span>·</span>
+                  <span>{new Date(wf.updatedAt).toLocaleString()}</span>
+                </div>
+                <div className="mt-2 space-y-1">
+                  {wf.steps.map((step, i) => (
+                    <div
+                      key={step.id ?? i}
+                      className="flex items-center gap-2 pl-4"
+                    >
+                      <span className="w-1 h-1 rounded-full border border-border" />
+                      <span className="text-xs font-mono">{step.name}</span>
+                      {step.tool && (
+                        <span className="text-[10px] font-mono text-fg-muted">
+                          · {step.tool}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div className="flex items-end gap-2">
-            <button
-              onClick={() => setShowJson((prev) => !prev)}
-              className="rounded border border-border bg-white px-3 py-2 text-xs font-mono text-fg-muted hover:bg-bg-elevated"
-            >
-              {showJson ? "Hide JSON" : "Show JSON"}
-            </button>
-            {showJson && (
-              <div className="rounded border border-border bg-zinc-950 p-3 text-[10px] font-mono text-zinc-400 overflow-auto max-h-96">
-                {JSON.stringify(workflow, null, 2)}
-              </div>
-            )}
-          </div>
-        </>
-      )}
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

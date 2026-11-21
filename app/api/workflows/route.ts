@@ -4,8 +4,8 @@ import { getSession } from "@/lib/auth";
 import { z } from "zod";
 
 const workflowSchema = z.object({
-  companyId: z.string(),
-  createdById: z.string(),
+  companyId: z.string().optional(),
+  createdById: z.string().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   steps: z
@@ -47,25 +47,41 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const data = workflowSchema.parse(body);
+    const data = workflowSchema.safeParse(body);
+    if (!data.success) {
+      return NextResponse.json(
+        { error: data.error.errors[0]?.message || "invalid input" },
+        { status: 400 }
+      );
+    }
 
-    const company = await db.company.findUnique({
-      where: { id: data.companyId },
-    });
-    if (!company || company.userId !== session.userId) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    let { companyId, createdById, name, description, steps } = data.data;
+
+    // FIX-6: resolve companyId/createdById server-side if omitted.
+    if (!companyId || !createdById) {
+      const company = await db.company.findUnique({
+        where: { userId: session.userId },
+      });
+      if (!company) {
+        return NextResponse.json(
+          { error: "company_not_found", companyUrl: "/company" },
+          { status: 404 }
+        );
+      }
+      companyId = company.id;
+      createdById = session.userId;
     }
 
     const workflow = await db.workflow.create({
       data: {
-        companyId: data.companyId,
-        createdById: data.createdById,
-        name: data.name,
-        description: data.description ?? null,
+        companyId,
+        createdById,
+        name,
+        description: description ?? null,
         steps:
-          data.steps?.length
+          steps?.length
             ? {
-                create: data.steps.map((s, i) => ({
+                create: steps.map((s, i) => ({
                   name: s.name,
                   order: i,
                   tool: s.tool ?? null,
@@ -78,12 +94,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, workflow });
   } catch (err) {
-    if (err instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: err.errors[0]?.message || "invalid input" },
-        { status: 400 }
-      );
-    }
     return NextResponse.json(
       { error: "workflow creation failed" },
       { status: 500 }
