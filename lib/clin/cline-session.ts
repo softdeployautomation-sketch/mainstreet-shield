@@ -298,7 +298,7 @@ ARTEX orchestration tools (call ARTEX sidecar at 127.0.0.1:8787 via HTTP):
 - artex_scan_stop — Stop a running ARTEX task. Input: { taskId }. Returns { taskId, stopped: true }.
 
 Asset write tools (MainStreet company DB):
-- create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset").
+- create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset" or "add 164.68.105.96 as an asset"). Target can be a hostname, IP address, URL, or any identifier — no URL validation is applied.
 - update_asset — Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Use when the user wants to change an asset's name, scope, type, target, or group.
 - add_asset_to_group — Assign an existing asset to a group. Input: { id, groupId }. Use when the user wants to organize an asset under a group.
 

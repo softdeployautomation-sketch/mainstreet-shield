@@ -55,28 +55,31 @@ export function AgentChat() {
 
   // --- session list (A-0d previous-chat list) ------------------------------
 
-  const fetchSessions = useCallback(async () => {
+  const fetchSessions = useCallback(async (): Promise<SessionRow[]> => {
     try {
       const res = await fetch("/api/mss/agent/sessions", {
         credentials: "same-origin",
       });
       if (!res.ok) {
         setSessionsError(`Failed to load sessions (${res.status})`);
-        return;
+        return [];
       }
       const data = await res.json();
-      setSessions(data.sessions ?? []);
+      const rows = data.sessions ?? [];
+      setSessions(rows);
       setSessionsError(null);
+      return rows;
     } catch (err) {
       // B-2: surface session-list errors instead of silently swallowing them.
       setSessionsError(err instanceof Error ? err.message : "Failed to load sessions");
+      return [];
     }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await fetchSessions();
+      const rows = await fetchSessions();
       // Auto-load the most recent session on mount so conversations survive refresh.
       // Preference: stored session (localStorage) > sessions from DB.
       // If fetchSessions() failed (e.g. auth), stored session can still load directly.
@@ -87,11 +90,11 @@ export function AgentChat() {
       let targetTitle: string | null = null;
       if (storedSession && !sessionId) {
         targetId = storedSession;
-        const found = sessions.find((s) => s.id === storedSession);
+        const found = rows.find((s) => s.id === storedSession);
         targetTitle = found?.title ?? null;
-      } else if (!sessionId && sessions.length > 0) {
-        targetId = sessions[0].id;
-        targetTitle = sessions[0].title ?? null;
+      } else if (!sessionId && rows.length > 0) {
+        targetId = rows[0].id;
+        targetTitle = rows[0].title ?? null;
       }
       if (!cancelled && targetId) {
           setSessionId(targetId);
@@ -121,7 +124,7 @@ export function AgentChat() {
       cancelled = true;
     })();
     return () => { cancelled = true; };
-  }, [fetchSessions, sessionId, sessions]);
+  }, [fetchSessions, sessionId]);
 
   // --- fetch saved Cline modelId from settings -----------------------------
 
@@ -595,27 +598,27 @@ export function AgentChat() {
               <details className="ml-0 flex flex-col gap-1 max-w-[80%]">
                 <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 rounded border border-border bg-bg-elevated/50 text-[10px] font-mono text-zinc-400 hover:text-fg">
                   <span className="w-1 h-1 rounded-full bg-zinc-500" />
-                  <span className="uppercase tracking-wider">Tool calls</span>
-                  <span className="ml-auto text-[10px] text-zinc-500">{msg.tools.length} call{msg.tools.length !== 1 ? "s" : ""}</span>
+                  <span className="uppercase tracking-wider">Tools ({msg.tools.length})</span>
                 </summary>
-                <div className="rounded border border-border bg-bg-elevated/50 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto space-y-2">
-                  {msg.tools.map((tool, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <span className="w-[16px] text-[10px]">
-                        {tool.isError ? "⚠" : tool.output !== undefined ? "✓" : "🔧"}
-                      </span>
-                      <div className="flex-1">
-                        <div className="font-mono text-zinc-400 mb-0.5">{tool.toolName}</div>
-                        {tool.isError ? (
-                          <div className="text-rose-400">{String(tool.output ?? tool.input)}</div>
-                        ) : tool.output !== undefined ? (
-                          <div className="break-words whitespace-pre-wrap text-zinc-300">{JSON.stringify(tool.output, null, 2).slice(0, 500)}</div>
-                        ) : (
-                          <div className="break-words whitespace-pre-wrap text-zinc-400">{JSON.stringify(tool.input, null, 2).slice(0, 500)}</div>
+                <div className="rounded border border-border bg-bg-elevated/50 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto space-y-1">
+                  {msg.tools.map((tool, i) => {
+                    const icon = tool.isError ? "✗" : tool.output !== undefined ? "✓" : "🔧";
+                    const color = tool.isError ? "text-rose-400" : tool.output !== undefined ? "text-emerald-400" : "text-zinc-400";
+                    return (
+                      <div key={i} className="break-words whitespace-pre-wrap mb-0.5">
+                        <span className={color}>{icon} {tool.toolName}</span>
+                        {tool.isError && tool.output !== undefined && (
+                          <span className="text-rose-300 ml-1">error: {String(tool.output).slice(0, 200)}</span>
+                        )}
+                        {!tool.isError && tool.output !== undefined && (
+                          <span className="text-zinc-300 ml-1">→ {String(tool.output).slice(0, 300)}</span>
+                        )}
+                        {!tool.isError && tool.output === undefined && tool.input !== undefined && (
+                          <span className="text-zinc-400 ml-1">({String(tool.input).slice(0, 300)})</span>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </details>
             )}
