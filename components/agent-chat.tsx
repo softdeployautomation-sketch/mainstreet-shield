@@ -323,21 +323,19 @@ export function AgentChat() {
             className={`flex flex-col gap-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             {msg.role === "assistant" && msg.thinking && msg.thinking.length > 0 && (
-              <div className="ml-0 flex flex-col gap-1">
-                <button
-                  className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 hover:text-emerald-300"
-                >
+              <details className="ml-0 flex flex-col gap-1 max-w-[80%]">
+                <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 rounded border border-zinc-800/50 bg-zinc-900/40 text-[10px] font-mono text-emerald-400 hover:text-emerald-300">
                   <span className="w-1 h-1 rounded-full bg-emerald-500" />
                   <span className="uppercase tracking-wider">Model thinking</span>
-                </button>
-                <div className="rounded border border-zinc-800/50 bg-zinc-900/40 p-2 text-xs text-zinc-400 font-mono leading-relaxed max-w-[80%]">
+                </summary>
+                <div className="rounded border border-zinc-800/50 bg-zinc-900/40 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto">
                   {msg.thinking.map((t, i) => (
                     <div key={i} className="break-words whitespace-pre-wrap mb-1">
                       {t}
                     </div>
                   ))}
                 </div>
-              </div>
+              </details>
             )}
             <div
               className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${
