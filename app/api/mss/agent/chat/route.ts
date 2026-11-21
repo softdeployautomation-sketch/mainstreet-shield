@@ -41,15 +41,14 @@ export async function POST(req: Request) {
   }
 
   const { message, sessionId, modelId, userImages, userFiles } = parsed.data;
+  const wantSSE = req.headers.get("accept")?.includes("text/event-stream");
 
-  // Resume an existing runtime session, otherwise start a fresh Cline session.
-  // Everything is wrapped so an uncaught exception (ClineCore.create, SDK
-  // start/send, DB upsert) returns a JSON error instead of HTML 500 that the
-  // frontend can't parse — which previously surfaced as "Chat failed".
-  let result;
-  try {
-    if (sessionId) {
-    result = await sendClineMessage({
+  // ── non-SSE path: existing JSON response (fallback) ─────────────────────
+  if (!wantSSE) {
+    let result;
+    try {
+      if (sessionId) {
+        result = await sendClineMessage({
       sessionId,
       userId: session.userId,
       prompt: message,
@@ -131,9 +130,125 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({
-    response: result.response,
-    thinking: result.thinking,
-    sessionId: result.sessionId,
-    clineReady: true,
+      response: result.response,
+      thinking: result.thinking,
+      sessionId: result.sessionId,
+      clineReady: true,
+    });
+  }
+
+  // ── SSE path: stream thinking / tool-call / tool-result / content / done ─
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enqueue = (type: string, data: unknown) => {
+        try {
+          controller.enqueue(
+            `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`,
+          );
+        } catch {
+          // Client disconnected — stop trying to enqueue.
+        }
+      };
+
+      let result;
+      try {
+        if (sessionId) {
+          result = await sendClineMessage(
+            {
+              sessionId,
+              userId: session.userId,
+              prompt: message,
+              userImages,
+              userFiles,
+            },
+            (event) => enqueue(event.type, event.data),
+          );
+          if (result.status === "failed") {
+            result = await startClineSession(
+              {
+                userId: session.userId,
+                prompt: message,
+                sessionId,
+                modelId,
+                userImages,
+                userFiles,
+              },
+              (event) => enqueue(event.type, event.data),
+            );
+          }
+        } else {
+          result = await startClineSession(
+            {
+              userId: session.userId,
+              prompt: message,
+              modelId,
+              userImages,
+              userFiles,
+            },
+            (event) => enqueue(event.type, event.data),
+          );
+        }
+      } catch (err) {
+        enqueue("error", {
+          message: err instanceof Error ? err.message : "Cline session failed",
+        });
+        controller.close();
+        return;
+      }
+
+      if (result.status === "failed") {
+        const isAuthFailure =
+          result.error === "cline_disconnected" ||
+          (typeof result.error === "string" && isClineAuthError(result.error));
+        if (isAuthFailure) {
+          enqueue("error", {
+            error: "connect_cline_first",
+            response:
+              "Connect your Cline account first (Settings → Cline → \\\"Log in to Cline\\\"), then start a new chat.",
+            sessionId: null,
+            clineReady: false,
+          });
+        } else {
+          enqueue("error", {
+            error: result.error ?? "Cline session failed",
+            sessionId: null,
+            clineReady: false,
+          });
+        }
+        controller.close();
+        return;
+      }
+
+      try {
+        await db.mssAgentSession.upsert({
+          where: { id: result.sessionId },
+          update: { status: "active" },
+          create: {
+            id: result.sessionId,
+            userId: session.userId,
+            status: "active",
+            title: message ? message.slice(0, 60) : undefined,
+          },
+        });
+      } catch {
+        // Session tracking failure must not block a successful chat response.
+      }
+
+      enqueue("done", {
+        sessionId: result.sessionId,
+        response: result.response,
+        thinking: result.thinking,
+        clineReady: true,
+      });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+    },
   });
 }

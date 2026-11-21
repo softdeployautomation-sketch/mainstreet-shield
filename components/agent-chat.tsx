@@ -187,7 +187,10 @@ export function AgentChat() {
       const res = await fetch("/api/mss/agent/chat", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
         body: JSON.stringify({ message: text, sessionId, modelId, userImages: images, userFiles: files }),
       });
       if (!res.ok) {
@@ -202,16 +205,126 @@ export function AgentChat() {
         }
         return;
       }
-      const data = await res.json();
+
+      const assistantId = Math.random().toString(36).slice(2, 10);
+      let accumulatedContent = "";
+      let accumulatedThinking: string[] = [];
+      let accumulatedTools: ToolCall[] = [];
+
+      // Optimistically add the assistant message so streaming can update it in place.
       const assistantMsg: Message = {
-        id: Math.random().toString(36).slice(2, 10),
+        id: assistantId,
         role: "assistant",
-        content: data.response ?? "(no response)",
-        thinking: data.thinking,
+        content: "",
+        thinking: [],
+        tools: [],
       };
       setMessages((prev) => [...prev, assistantMsg]);
-      if (data.sessionId) setSessionId(data.sessionId);
-      if (data.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from the buffered byte stream.
+        let nlIdx: number;
+        while ((nlIdx = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, nlIdx);
+          buffer = buffer.slice(nlIdx + 2);
+
+          let eventType = "";
+          let eventData = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) eventType = line.slice(7);
+            else if (line.startsWith("data: ")) eventData = line.slice(6);
+          }
+          if (!eventData) continue;
+
+          let payload: unknown;
+          try {
+            payload = JSON.parse(eventData);
+          } catch {
+            continue; // skip malformed SSE data
+          }
+
+          const p = payload as {
+            delta?: string;
+            reasoning?: string;
+            end?: boolean;
+            toolName?: string;
+            input?: unknown;
+            output?: unknown;
+            isError?: boolean;
+            response?: string;
+            thinking?: string[];
+            sessionId?: string;
+            clineReady?: boolean;
+            message?: string;
+            error?: string;
+          };
+
+          if (eventType === "content") {
+            if (typeof p.delta === "string") {
+              accumulatedContent += p.delta;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: accumulatedContent } : m,
+                ),
+              );
+            }
+          } else if (eventType === "thinking") {
+            if (typeof p.reasoning === "string" && !p.end) {
+              accumulatedThinking.push(p.reasoning);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, thinking: [...accumulatedThinking] }
+                    : m,
+                ),
+              );
+            }
+          } else if (eventType === "tool-call") {
+            accumulatedTools.push({ toolName: p.toolName ?? "tool", input: p.input });
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
+              ),
+            );
+          } else if (eventType === "tool-result") {
+            accumulatedTools.push({
+              toolName: p.toolName ?? "tool",
+              output: p.output,
+              isError: p.isError,
+            });
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
+              ),
+            );
+          } else if (eventType === "done") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      content: p.response ?? accumulatedContent,
+                      thinking: p.thinking ?? accumulatedThinking,
+                      tools: accumulatedTools,
+                    }
+                  : m,
+              ),
+            );
+            if (p.sessionId) setSessionId(p.sessionId);
+            if (p.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
+          } else if (eventType === "error") {
+            setError(p.message || "Chat failed");
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {

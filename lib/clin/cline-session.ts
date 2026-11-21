@@ -143,8 +143,95 @@ function extractTurnResult(messages: MessageWithMetadata[]): ClineTurnResult {
 }
 
 // ---------------------------------------------------------------------------
-// Session lifecycle (start / send / read / list / stop / delete)
+// 2B-5: SSE event translation for live thinking + tool chips during a turn.
+// Maps CoreSessionEvent / AgentEvent shapes to UI-facing stream events.
 // ---------------------------------------------------------------------------
+
+export interface ClineStreamEvent {
+  type: "thinking" | "content" | "tool-call" | "tool-result" | "done" | "error";
+  data: unknown;
+}
+
+type OnClineEvent = (event: ClineStreamEvent) => void;
+
+function translateCoreEvent(event: CoreSessionEvent): ClineStreamEvent | null {
+  // --- agent_event: structured content / tool boundaries -------------------
+  if (event.type === "agent_event") {
+    const agentEvent = event.payload.event as {
+      type?: string;
+      contentType?: string;
+      reasoning?: string;
+      text?: string;
+      accumulated?: string;
+      toolName?: string;
+      input?: unknown;
+      output?: unknown;
+      isError?: boolean;
+      [key: string]: unknown;
+    };
+
+    switch (agentEvent.type) {
+      case "content_start":
+        if (agentEvent.contentType === "reasoning") {
+          return {
+            type: "thinking",
+            data: { reasoning: agentEvent.reasoning, accumulated: agentEvent.accumulated },
+          };
+        }
+        if (agentEvent.contentType === "tool") {
+          return {
+            type: "tool-call",
+            data: { toolName: agentEvent.toolName, input: agentEvent.input },
+          };
+        }
+        break;
+      case "content_end":
+        if (agentEvent.contentType === "reasoning") {
+          return { type: "thinking", data: { reasoning: agentEvent.reasoning, end: true } };
+        }
+        if (agentEvent.contentType === "tool") {
+          return {
+            type: "tool-result",
+            data: { toolName: agentEvent.toolName, output: agentEvent.output, isError: agentEvent.isError },
+          };
+        }
+        break;
+      case "done":
+        return { type: "done", data: {} };
+      case "error":
+        return {
+          type: "error",
+          data: { message: (agentEvent as { message?: string }).message },
+        };
+    }
+  }
+
+  // --- chunk: raw text deltas streamed from the agent ----------------------
+  if (event.type === "chunk" && event.payload.stream === "agent") {
+    return { type: "content", data: { delta: (event.payload as { chunk: string }).chunk } };
+  }
+
+  // --- hook: session tool_call / tool_result -------------------------------
+  if (event.type === "hook") {
+    const hook = event.payload as {
+      hookEventName?: string;
+      toolName?: string;
+      input?: unknown;
+      output?: unknown;
+    };
+    if (hook.hookEventName === "tool_call") {
+      return { type: "tool-call", data: { toolName: hook.toolName, input: hook.input } };
+    }
+    if (hook.hookEventName === "tool_result") {
+      return {
+        type: "tool-result",
+        data: { toolName: hook.toolName, output: hook.output },
+      };
+    }
+  }
+
+  return null;
+}
 
 export interface StartClineSessionInput {
   userId: string;
@@ -181,6 +268,7 @@ If Cline is not connected, tell the user to connect it in Settings (\"Log in to 
 
 export async function startClineSession(
   input: StartClineSessionInput,
+  onEvent?: OnClineEvent,
 ): Promise<StartClineSessionResult> {
   const creds = await resolveClineCredentials(input.userId);
   if (!creds) {
@@ -201,8 +289,9 @@ export async function startClineSession(
 
   const modelId = input.modelId ?? creds.modelId ?? "anthropic/claude-sonnet-4-20250514";
 
-  const unsubscribe = core.subscribe((_event: CoreSessionEvent) => {
-    // Live event feed captured server-side; the transcript is read after the turn.
+  const unsubscribe = core.subscribe((event: CoreSessionEvent) => {
+    const streamEvent = translateCoreEvent(event);
+    if (streamEvent) onEvent?.(streamEvent);
   });
   _sessionUnsub.set(sessionId, unsubscribe);
 
@@ -291,6 +380,7 @@ export interface SendClineMessageResult {
 
 export async function sendClineMessage(
   input: SendClineMessageInput,
+  onEvent?: OnClineEvent,
 ): Promise<SendClineMessageResult> {
   const creds = await resolveClineCredentials(input.userId);
   if (!creds) {
@@ -304,6 +394,11 @@ export async function sendClineMessage(
   }
 
   const core = await getCline();
+  const unsubscribe = core.subscribe((event: CoreSessionEvent) => {
+    const streamEvent = translateCoreEvent(event);
+    if (streamEvent) onEvent?.(streamEvent);
+  });
+  _sessionUnsub.set(input.sessionId, unsubscribe);
   try {
     await core.send({
       sessionId: input.sessionId,
