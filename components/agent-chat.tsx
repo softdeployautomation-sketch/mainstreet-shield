@@ -377,13 +377,15 @@ export function AgentChat() {
   }, [input, sending, sessionId, pendingFiles, modelId, sessionTitle]);
 
   const scrollBottom = () => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    setTimeout(() => {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 0);
   };
   useEffect(() => {
     scrollBottom();
   }, [messages]);
 
-  const sessionLabel = sessionTitle || (sessionId ? "Chat" : "New chat");
+  const sessionLabel = sessionTitle || (sessionId ? "Chat" : "Sessions");
 
   return (
     <div className="flex flex-col h-full">
