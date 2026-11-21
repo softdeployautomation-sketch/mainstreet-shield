@@ -56,11 +56,18 @@ export interface ClineCredentials {
 
 async function resolveClineCredentials(userId: string): Promise<ClineCredentials | null> {
   // 1. Stored OAuth access token (decrypted at rest by token-store).
+  // Also load the user's saved model preference from UserSettings so the
+  // selected model is used even when authenticating via OAuth.
   const oauthToken = await getClineOAuthToken(userId);
   if (oauthToken) {
+    const settings = await db.userSettings.findUnique({
+      where: { userId },
+      select: { clineModelId: true },
+    });
     return {
       apiKey: formatProviderOAuthApiKey("cline", { access: oauthToken }),
       providerId: "cline",
+      modelId: settings?.clineModelId ?? undefined,
     };
   }
 

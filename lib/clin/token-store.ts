@@ -69,6 +69,19 @@ export async function getValidClineOAuthToken(userId: string): Promise<string | 
     return null; // undecryptable — treat as empty so user can re-login
   }
 
+  const expires = row.expiresAt ? row.expiresAt.getTime() : undefined;
+
+  // If the token is not expired (and not within the refresh buffer), return
+  // it as-is. Only attempt a refresh when expiry is near — this avoids
+  // calling getValidClineCredentials on every turn, which can clear a valid
+  // session when the SDK returns null for a token that doesn't need refresh.
+  const now = Date.now();
+  const needsRefresh = expires && expires <= now + REFRESH_BUFFER_MS;
+
+  if (!needsRefresh) {
+    return access;
+  }
+
   let refresh: string | undefined;
   if (row.clineRefreshTokenEnc) {
     try {
@@ -78,22 +91,27 @@ export async function getValidClineOAuthToken(userId: string): Promise<string | 
     }
   }
 
-  const expires = row.expiresAt ? row.expiresAt.getTime() : undefined;
-
   const current: { access: string; refresh?: string; expires?: number } = { access };
   if (refresh) current.refresh = refresh;
   if (expires) current.expires = expires;
 
-  const refreshed = await getValidClineCredentials(
-    current as { access: string; refresh: string; expires: number },
-    { apiBaseUrl: getClineApiBaseUrl() },
-    { refreshBufferMs: REFRESH_BUFFER_MS },
-  );
-
-  if (!refreshed) {
-    // Refresh rejected — clear credentials so user re-logins
+  let refreshed;
+  try {
+    refreshed = await getValidClineCredentials(
+      current as { access: string; refresh: string; expires: number },
+      { apiBaseUrl: getClineApiBaseUrl() },
+      { refreshBufferMs: REFRESH_BUFFER_MS },
+    );
+  } catch {
+    // SDK threw — treat as auth failure, clear session so user re-logins
     await clearClineAuthSession(userId).catch(() => {});
     return null;
+  }
+
+  if (!refreshed) {
+    // SDK returned null but didn't throw — token may still be usable.
+    // Return the stored access token instead of clearing the session.
+    return access;
   }
 
   // Persist refreshed credentials so next call starts fresh

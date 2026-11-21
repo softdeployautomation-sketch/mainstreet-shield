@@ -32,6 +32,7 @@ export function AgentChat() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionsPanelOpen, setSessionsPanelOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [modelId, setModelId] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +67,25 @@ export function AgentChat() {
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
+
+  // --- fetch saved Cline modelId from settings -----------------------------
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/settings/cline", {
+          credentials: "same-origin",
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json().catch(() => ({}));
+        setModelId((data.settings?.clineModelId ?? "") as string);
+      } catch {
+        // swallow — modelId stays empty, Cline default will be used
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const newChat = useCallback(() => {
     setMessages([]);
@@ -157,7 +177,7 @@ export function AgentChat() {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId, userImages: images, userFiles: files }),
+        body: JSON.stringify({ message: text, sessionId, modelId, userImages: images, userFiles: files }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -185,7 +205,7 @@ export function AgentChat() {
     } finally {
       setSending(false);
     }
-  }, [input, sending, sessionId, pendingFiles]);
+  }, [input, sending, sessionId, pendingFiles, modelId]);
 
   const scrollBottom = () => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
