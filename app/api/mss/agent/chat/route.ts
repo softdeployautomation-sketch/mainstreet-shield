@@ -1,19 +1,26 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { z } from "zod";
-import { getClineOAuthToken } from "@/lib/clin/token-store";
+import { db } from "@/lib/db";
+import {
+  sendClineMessage,
+  startClineSession,
+} from "@/lib/clin/cline-session";
 
 const chatSchema = z.object({
   message: z.string().min(1),
   sessionId: z.string().optional(),
+  modelId: z.string().optional(),
+  userImages: z.array(z.string()).optional(),
+  userFiles: z.array(z.string()).optional(),
 });
 
 export const dynamic = "force-dynamic";
 
-// POST /api/mss/agent/chat — Chat with the MSS Agent (Cline-powered).
-// Returns `{ response, reasoning: string[] }`. Works WITHOUT a VM being on
-// because the agent's reasoning/logic runs directly; VM access is only needed
-// for actions that target the lab VM.
+// POST /api/mss/agent/chat — Chat with the MSS Agent (real ClineCore session).
+// Replaces the echo stub: every turn now runs through `ClineCore.start`/`send`,
+// so replies come from the model (with thinking + tool activity) instead of a
+// canned template. Disconnected Cline → short "connect Cline first" error.
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) {
@@ -32,36 +39,78 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { message } = parsed.data;
-  const reasoning: string[] = [];
+  const { message, sessionId, modelId, userImages, userFiles } = parsed.data;
 
-  reasoning.push(`Received user message: "${message}"`);
-  reasoning.push("MSS Agent: checking Cline credentials and session context");
-
-  let clineReady = false;
-  try {
-    const token = await getClineOAuthToken(session.userId);
-    if (token) {
-      clineReady = true;
-      reasoning.push("Cline OAuth token found — MSS Agent authenticated");
-    } else {
-      reasoning.push("No Cline OAuth token — agent will run in read-only mode");
+  // Resume an existing runtime session, otherwise start a fresh Cline session.
+  let result;
+  if (sessionId) {
+    result = await sendClineMessage({
+      sessionId,
+      userId: session.userId,
+      prompt: message,
+      userImages,
+      userFiles,
+    });
+    // If the Cline runtime no longer holds this session (e.g. server restart),
+    // resume it as a fresh run so session switching still works.
+    if (result.status === "failed") {
+      result = await startClineSession({
+        userId: session.userId,
+        prompt: message,
+        sessionId,
+        modelId,
+        userImages,
+        userFiles,
+      });
     }
-  } catch {
-    reasoning.push("Could not read Cline token — agent will run in read-only mode");
+  } else {
+    result = await startClineSession({
+      userId: session.userId,
+      prompt: message,
+      modelId,
+      userImages,
+      userFiles,
+    });
   }
 
-  reasoning.push("MSS Agent: analyzing intent and selecting tools");
-  reasoning.push("Works without VM — agent logic executes directly (no VM required)");
+  if (result.status === "failed") {
+    if (result.error === "cline_disconnected") {
+      return NextResponse.json(
+        {
+          error: "connect_cline_first",
+          response:
+            "Connect your Cline account first (Settings → Cline → \"Log in to Cline\"), then start a new chat.",
+          sessionId: null,
+          clineReady: false,
+        },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json(
+      {
+        error: result.error ?? "Cline session failed",
+        sessionId: null,
+        clineReady: false,
+      },
+      { status: 500 },
+    );
+  }
 
-  const response = clineReady
-    ? `I received your message ("${message}"). Your Cline account is connected, so the MSS Agent can act on your behalf using the available toolset. What would you like me to do next?`
-    : `I received your message ("${message}"). Connect your Cline account in Settings ("Log in to Cline") so the MSS Agent can act on your behalf. Until then, I can still help you reason through security research tasks.`;
+  // Track the chat session per user so the previous-chat list (A-0d) has rows.
+  await db.mssAgentSession.upsert({
+    where: { id: result.sessionId },
+    update: { status: "active" },
+    create: {
+      id: result.sessionId,
+      userId: session.userId,
+      status: "active",
+    },
+  });
 
   return NextResponse.json({
-    response,
-    reasoning,
-    sessionId: parsed.data.sessionId ?? null,
-    clineReady,
+    response: result.response,
+    thinking: result.thinking,
+    sessionId: result.sessionId,
+    clineReady: true,
   });
 }

@@ -130,3 +130,29 @@ after all three: owner dispatches "Build & Deploy" → live verify V-4/V-5/V-6
 ## Out of scope here (see master plan)
 Agent engine, report sheet, attack frameworks, auto-workflow — Batch 2/3.
 `free-models` hardcoded list, `mss-agent-verification` dead code — Batch 5 cleanup.
+
+--- Batch 2 — Agent core (restructured v2.2, thinking + file attach + session mgmt) — BEFORE ---
+
+| When | Phase | Status | Notes |
+|---|---|---|---|
+| 2026-11-21 | Master plan Batch 2 restructure — BEFORE | DONE | Expanding A-0: ClineCore session + live thinking panel + file/image attach + session mgmt (new chat / plus / previous chat). Owner: "guide the agent, don't come between." No echo path. |
+| 2026-11-21 | A-0a ClineCore session backbone — BEFORE | DONE | Replace echo route.ts:57-59. OAuth token from ClineAuthSession / API key from UserSettings. Multi-turn per user. Security-agent system prompt. Disconnected → short "connect Cline" error. |
+| 2026-11-21 | A-0b Live thinking/reasoning panel — BEFORE | DONE | Streaming ThinkingContent from Cline events + transcript thinking field → collapsible "Model thinking" in chat (spaceworker cyberlab-agent-console.tsx pattern). |
+| 2026-11-21 | A-0c File + image attach — BEFORE | DONE | SendSessionInput userFiles/userImages + FileContent/ImageContent content blocks. Attach button in chat modal. |
+| 2026-11-21 | A-0d Session management — BEFORE | DONE | New chat (+ button), previous chat list, switch sessions, per-user session persistence (MssAgentSession / transcript). Like Cline extension sidebar. |
+| 2026-11-21 | A-0 UI rewrite agent-chat.tsx — BEFORE | DONE | Thinking collapsible + attach button + session switcher + send from Cline (never echo). |
+| 2026-11-21 | A-0a ClineCore session backbone — AFTER | DONE | NEW `lib/clin/cline-session.ts`: ClineCore singleton (backendMode local), credential resolution (OAuth via formatProviderOAuthApiKey, else UserSettings API key), start/send/subscribe, thinking extraction, disconnected → cline_disconnected. |
+| 2026-11-21 | A-0b Live thinking/reasoning panel — AFTER | DONE | agent-chat.tsx: collapsible "Model thinking" block per assistant message, populated from `thinking` (ThinkingContent) returned by the chat route. |
+| 2026-11-21 | A-0c File + image attach — AFTER | DONE | Chat route accepts `userImages`/`userFiles` and forwards to `cline.send`; agent-chat.tsx attach button reads files to base64 data URLs and sends them as userImages/userFiles. |
+| 2026-11-21 | A-0d Session management — AFTER | DONE | NEW `app/api/mss/agent/sessions/route.ts` (list) + `sessions/[id]/messages/route.ts` (transcript); MssAgentSession row upserted per chat; agent-chat.tsx new-chat + previous-chat list + session switcher. |
+| 2026-11-21 | A-0 UI rewrite agent-chat.tsx — AFTER | DONE | agent-chat.tsx rewritten: thinking panel + attach button + session switcher + send from Cline (never echo); connect_cline_first error surfaced. |
+
+| 2026-11-21 | A-1 Agent context API — BEFORE | PLANNED | GET /api/mss/agent/context: assets + workflows + report summary → system prompt. Depends A-0 shell. |
+| 2026-11-21 | A-2 Workflow persistence — BEFORE | PLANNED | Save into Workflow/WorkflowStep; Workflow.definition Json?; one owner db push approval (with A-4). |
+| 2026-11-21 | A-3 Workflow rename/edit human+agent — BEFORE | PLANNED | Same PATCH /api/workflows/[id]. F-3 route exists. |
+| 2026-11-21 | A-4 Report sheet — BEFORE | PLANNED | AssetReportEntry model + GET/POST /api/assets/[id]/report + append_report tool. Schema approval with A-2. |
+| 2026-11-21 | A-5 Agent tools on A-0 session — BEFORE | PLANNED | list_assets, list_workflows, save_workflow, rename_workflow, append_report, get_report. Depends A-0..A-4. |
+| 2026-11-21 | A-6 WorkflowBuilder → Workflow list UI — BEFORE | PLANNED | List saved workflows, open, rename, view steps. Depends F-3, A-2. |
+
+--- Batch 2 AFTER (all A-0 phases complete; gates G-1..G-3 pass) ---
+
