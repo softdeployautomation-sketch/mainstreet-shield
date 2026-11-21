@@ -400,6 +400,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
+// 2B-2: Cline wraps user prompts in `<user_input mode="...">` tags when they
+// pass through ClineCore. Strip that wrapper from user message text so user
+// bubbles show plain prompt text, never XML. The DB already stores the clean
+// raw prompt (persistClineTurn stores input.prompt), so this is a safety net
+// for any wrapped text that reaches the normalizer (live ClineCore reads,
+// legacy records, or future SSE paths).
+function stripUserInput(text: string): string {
+  return text.replace(/<user_input\b[^>]*>([\s\S]*?)<\/user_input>/g, "$1").trim();
+}
+
 function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | null {
   // JSON round-trip can nest the real message under `wrapper.message`.
   const wrapper = asRecord(m);
@@ -430,12 +440,13 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
     if (!part) continue;
     const type = String(part.type ?? "");
     if (type === "text") {
-      if (typeof part.text === "string" && part.text.trim()) texts.push(part.text);
+      if (typeof part.text === "string" && part.text.trim())
+        texts.push(role === "user" ? stripUserInput(part.text) : part.text);
     } else if (type === "thinking" || type === "reasoning") {
       const value = part.thinking ?? part.text;
       if (typeof value === "string" && value.trim()) thinking.push(value);
     } else if (typeof part.text === "string" && part.text.trim()) {
-      texts.push(part.text);
+      texts.push(role === "user" ? stripUserInput(part.text) : part.text);
     }
   }
 
