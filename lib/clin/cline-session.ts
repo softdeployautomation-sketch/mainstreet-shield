@@ -12,6 +12,7 @@ import {
   MessageWithMetadata,
   ThinkingContent,
 } from "@cline/sdk";
+import type { AgentTool } from "@cline/shared";
 
 import { getClineOAuthToken, clearClineAuthSession } from "@/lib/clin/token-store";
 import { decryptSecret } from "@/lib/crypto";
@@ -258,13 +259,80 @@ You help the user research and validate security findings on systems they own an
 
 Enabled Cline tools: shell, file, search, web. You may use these tools to inspect targets, read files, run safe validation commands, and gather evidence. Do not claim you lack tools — they are enabled.
 
+MSS-specific tools:
+- list_assets — Returns all security assets owned by the user's company (id, name, type, target, inScope, groupId). Use when the user asks about their assets, inventory, or scope.
+- list_workflows — Returns all workflows owned by the user's company (id, name, step count, status). Use when the user asks about their workflows, automations, or scan routines.
+
 Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
 - Prefer explanation and safe validation; ask before any destructive action.
 - You are a real Cline agent, not a generic echo — ground every reply in the actual model output.
 
-If Cline is not connected, tell the user to connect it in Settings (\"Log in to Cline\").`;
+If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").`;
+
+export function mssTools(userId: string): AgentTool[] {
+  return [
+    {
+      name: "list_assets",
+      description:
+        "List all security assets owned by the authenticated user's company. Returns id, name, type, target, inScope, groupId.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const company = await db.company.findUnique({
+          where: { userId },
+          include: {
+            assets: { orderBy: { createdAt: "desc" } },
+          },
+        });
+        return {
+          assets: (company?.assets ?? []).map((a) => ({
+            id: a.id,
+            name: a.name,
+            type: a.type,
+            target: a.target,
+            inScope: a.inScope,
+            groupId: a.groupId,
+          })),
+        };
+      },
+    },
+    {
+      name: "list_workflows",
+      description:
+        "List all workflows owned by the authenticated user's company. Returns id, name, step count, status.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const company = await db.company.findUnique({
+          where: { userId },
+          include: {
+            workflows: {
+              include: { steps: true },
+              orderBy: { updatedAt: "desc" },
+            },
+          },
+        });
+        return {
+          workflows: (company?.workflows ?? []).map((w) => ({
+            id: w.id,
+            name: w.name,
+            stepCount: w.steps.length,
+            status: w.status,
+          })),
+        };
+      },
+    },
+  ];
+}
+
 
 export async function startClineSession(
   input: StartClineSessionInput,
@@ -308,6 +376,7 @@ export async function startClineSession(
         cwd,
         workspaceRoot: cwd,
         enableTools: true,
+        extraTools: mssTools(input.userId),
         enableSpawnAgent: false,
         enableAgentTeams: false,
       },
