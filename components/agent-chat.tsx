@@ -128,7 +128,7 @@ export function AgentChat() {
         setError(err instanceof Error ? err.message : "Failed to load conversation");
       }
     },
-    [],
+    [sessions],
   );
 
   // --- file attach (A-0c) --------------------------------------------------
@@ -209,7 +209,7 @@ export function AgentChat() {
     } finally {
       setSending(false);
     }
-  }, [input, sending, sessionId, pendingFiles, modelId]);
+  }, [input, sending, sessionId, pendingFiles, modelId, sessionTitle]);
 
   const scrollBottom = () => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });

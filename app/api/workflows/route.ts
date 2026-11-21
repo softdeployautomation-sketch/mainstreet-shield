@@ -55,10 +55,11 @@ export async function POST(req: Request) {
       );
     }
 
-    let { companyId, createdById, name, description, steps } = data.data;
+    let { companyId, name, description, steps } = data.data;
 
-    // FIX-6: resolve companyId/createdById server-side if omitted.
-    if (!companyId || !createdById) {
+    // Always resolve/verify company from the session. Never trust a
+    // client-supplied companyId without an ownership check (regression guard).
+    if (!companyId) {
       const company = await db.company.findUnique({
         where: { userId: session.userId },
       });
@@ -69,8 +70,16 @@ export async function POST(req: Request) {
         );
       }
       companyId = company.id;
-      createdById = session.userId;
+    } else {
+      const company = await db.company.findUnique({
+        where: { id: companyId },
+      });
+      if (!company || company.userId !== session.userId) {
+        return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      }
     }
+    // createdById always comes from the authenticated session.
+    const createdById = session.userId;
 
     const workflow = await db.workflow.create({
       data: {
