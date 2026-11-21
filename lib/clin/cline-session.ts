@@ -716,23 +716,18 @@ export function mssTools(userId: string): AgentTool[] {
           return { error: "company_not_found" };
         }
 
-        const res = await fetch("/api/assets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name,
-            type,
+        const asset = await db.companyAsset.create({
+          data: {
+            company: { connect: { id: company.id } },
+            name: name ?? "",
+            type: type as any,
             target,
             inScope: inScope ?? true,
-            ...(groupId !== undefined && { groupId }),
-          }),
+            ...(groupId !== undefined && { groupId: groupId as any }),
+          },
+          include: { group: true },
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          return { error: err.error || "asset creation failed" };
-        }
-        const data = await res.json();
-        return { ok: true, asset: data.asset };
+        return { ok: true, asset };
       },
     },
 
@@ -770,17 +765,23 @@ export function mssTools(userId: string): AgentTool[] {
           return { error: "company_not_found" };
         }
 
-        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fields),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          return { error: err.error || "asset update failed" };
+        const asset = await db.companyAsset.findUnique({ where: { id } });
+        if (!asset || asset.companyId !== company.id) {
+          return { error: "forbidden" };
         }
-        const data = await res.json();
-        return { ok: true, asset: data.asset };
+
+        const updated = await db.companyAsset.update({
+          where: { id },
+          data: {
+            ...(fields.name !== undefined && { name: fields.name }),
+            ...(fields.type !== undefined && { type: fields.type as any }),
+            ...(fields.target !== undefined && { target: fields.target }),
+            ...(fields.inScope !== undefined && { inScope: fields.inScope }),
+            ...(fields.groupId !== undefined && { groupId: fields.groupId }),
+          },
+          include: { group: true },
+        });
+        return { ok: true, asset: updated };
       },
     },
 
@@ -807,21 +808,60 @@ export function mssTools(userId: string): AgentTool[] {
           return { error: "company_not_found" };
         }
 
-        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ groupId }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          return { error: err.error || "assign asset to group failed" };
+        const asset = await db.companyAsset.findUnique({ where: { id } });
+        if (!asset || asset.companyId !== company.id) {
+          return { error: "forbidden" };
         }
-        const data = await res.json();
-        return { ok: true, asset: data.asset };
+
+        const updated = await db.companyAsset.update({
+          where: { id },
+          data: { groupId },
+          include: { group: true },
+        });
+        return { ok: true, asset: updated };
       },
     },
   ];
 }
+
+
+// ---------------------------------------------------------------------------
+// B-3: persist a full turn (user + assistant) so sessions survive ClineCore
+// recreation across serverless invocations.
+// ---------------------------------------------------------------------------
+export async function persistClineTurn(input: {
+  sessionId: string;
+  userId: string;
+  userPrompt: string;
+  assistantResponse: string;
+  thinking: string[];
+  tools: ToolCall[];
+}): Promise<void> {
+  await db.$transaction([
+    db.clineAgentMessage.create({
+      data: {
+        sessionId: input.sessionId,
+        userId: input.userId,
+        role: "user",
+        content: { text: input.userPrompt },
+      },
+    }),
+    db.clineAgentMessage.create({
+      data: {
+        sessionId: input.sessionId,
+        userId: input.userId,
+        role: "assistant",
+        content: {
+          text: input.assistantResponse,
+          thinking: input.thinking,
+          tools: input.tools,
+        } as any,
+      },
+    }),
+  ]);
+}
+
+
 
 
 export async function startClineSession(
@@ -847,9 +887,24 @@ export async function startClineSession(
 
   const modelId = input.modelId ?? creds.modelId ?? "anthropic/claude-sonnet-4-20250514";
 
+  // Accumulate SSE events during turn for persistence fallback
+  let sseResponse = "";
+  let sseThinking: string[] = [];
+  let sseTools: ToolCall[] = [];
+
   const unsubscribe = core.subscribe((event: CoreSessionEvent) => {
     const streamEvent = translateCoreEvent(event);
-    if (streamEvent) onEvent?.(streamEvent);
+    if (streamEvent) {
+      onEvent?.(streamEvent);
+      // Accumulate for persistence fallback
+      if (streamEvent.type === "content" && typeof streamEvent.data === "string") {
+        sseResponse += streamEvent.data;
+      } else if (streamEvent.type === "thinking" && typeof streamEvent.data === "string") {
+        sseThinking.push(streamEvent.data);
+      } else if (streamEvent.type === "tool-call" || streamEvent.type === "tool-result") {
+        sseTools.push(streamEvent.data as ToolCall);
+      }
+    }
   });
   _sessionUnsub.set(sessionId, unsubscribe);
 
@@ -900,21 +955,26 @@ export async function startClineSession(
 
   const messages = await core.readMessages(sessionId).catch(() => [] as MessageWithMetadata[]);
   const { response, thinking } = extractTurnResult(messages);
-  const assistantResponse = response || resultText;
+  const assistantResponse = response || resultText || sseResponse;
+
+  // Use SSE-accumulated thinking if ClineCore returned none
+  const finalThinking = thinking.length > 0 ? thinking : sseThinking;
 
   // B-3: persist the turn so the transcript survives ClineCore recreation.
+  // Don't swallow errors — if DB write fails, surface it.
   await persistClineTurn({
     sessionId,
     userId: input.userId,
     userPrompt: input.prompt,
     assistantResponse,
-    thinking,
-  }).catch(() => {});
+    thinking: finalThinking,
+    tools: sseTools,
+  });
 
   return {
     sessionId,
     response: assistantResponse,
-    thinking,
+    thinking: finalThinking,
     status: "completed",
     clineReady: true,
   };
@@ -952,10 +1012,25 @@ export async function sendClineMessage(
     };
   }
 
+  // Accumulate SSE events during turn for persistence fallback
+  let sseResponse = "";
+  let sseThinking: string[] = [];
+  let sseTools: ToolCall[] = [];
+
   const core = await getCline();
   const unsubscribe = core.subscribe((event: CoreSessionEvent) => {
     const streamEvent = translateCoreEvent(event);
-    if (streamEvent) onEvent?.(streamEvent);
+    if (streamEvent) {
+      onEvent?.(streamEvent);
+      // Accumulate for persistence fallback
+      if (streamEvent.type === "content" && typeof streamEvent.data === "string") {
+        sseResponse += streamEvent.data;
+      } else if (streamEvent.type === "thinking" && typeof streamEvent.data === "string") {
+        sseThinking.push(streamEvent.data);
+      } else if (streamEvent.type === "tool-call" || streamEvent.type === "tool-result") {
+        sseTools.push(streamEvent.data as ToolCall);
+      }
+    }
   });
   _sessionUnsub.set(input.sessionId, unsubscribe);
   try {
@@ -988,21 +1063,28 @@ export async function sendClineMessage(
 
   const messages = await core.readMessages(input.sessionId).catch(() => [] as MessageWithMetadata[]);
   const { response, thinking } = extractTurnResult(messages);
+  const assistantResponse = response || sseResponse;
+
+  // Use SSE-accumulated thinking if ClineCore returned none
+  const finalThinking = thinking.length > 0 ? thinking : sseThinking;
 
   // B-3: persist the turn so the transcript survives ClineCore recreation.
+  // Don't swallow errors — if DB write fails, surface it.
   await persistClineTurn({
     sessionId: input.sessionId,
     userId: input.userId,
     userPrompt: input.prompt,
-    assistantResponse: response,
-    thinking,
-  }).catch(() => {});
+    assistantResponse,
+    thinking: finalThinking,
+    tools: sseTools,
+  });
 
   return {
     sessionId: input.sessionId,
-    response,
-    thinking,
+    response: assistantResponse,
+    thinking: finalThinking,
     status: "completed",
+    clineReady: true,
   };
 }
 
@@ -1017,6 +1099,16 @@ export async function getClineSession(sessionId: string): Promise<unknown | unde
 }
 
 export async function readClineMessages(sessionId: string): Promise<MessageWithMetadata[]> {
+  // B-3: DB-first — session transcripts survive ClineCore recreation.
+  const rows = await db.clineAgentMessage.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: "asc" },
+  });
+  const dbMessages = rows.map((row) => clineAgentMessageToMessage(row));
+
+  if (dbMessages.length > 0) return dbMessages;
+
+  // Fallback to ClineCore if DB has nothing (fresh session).
   const core = await getCline();
   let messages: MessageWithMetadata[];
   try {
@@ -1024,14 +1116,7 @@ export async function readClineMessages(sessionId: string): Promise<MessageWithM
   } catch {
     messages = [];
   }
-  if (messages && messages.length > 0) return messages;
-
-  // B-3: DB fallback — session transcripts survive ClineCore recreation.
-  const rows = await db.clineAgentMessage.findMany({
-    where: { sessionId },
-    orderBy: { createdAt: "asc" },
-  });
-  return rows.map((row) => clineAgentMessageToMessage(row));
+  return messages ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,33 +1252,7 @@ function clineAgentMessageToMessage(row: {
   } as MessageWithMetadata;
 }
 
-// B-3: persist a completed turn so the transcript survives ClineCore
-// recreation across serverless invocations.
-export async function persistClineTurn(params: {
-  sessionId: string;
-  userId: string;
-  userPrompt: string;
-  assistantResponse: string;
-  thinking: string[];
-}): Promise<void> {
-  await db.clineAgentMessage.create({
-    data: {
-      sessionId: params.sessionId,
-      userId: params.userId,
-      role: "user",
-      content: { text: params.userPrompt },
-    },
-  });
-  await db.clineAgentMessage.create({
-    data: {
-      sessionId: params.sessionId,
-      userId: params.userId,
-      role: "assistant",
-      content: { text: params.assistantResponse, thinking: params.thinking },
-    },
-  });
-}
-
+// ---------------------------------------------------------------------------
 export async function stopClineSession(sessionId: string): Promise<void> {
   const core = await getCline();
   await core.stop(sessionId).catch(() => {
