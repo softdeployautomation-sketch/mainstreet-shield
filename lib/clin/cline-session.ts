@@ -19,6 +19,31 @@ import { decryptSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
+// ARTEX sidecar HTTP contract (AGPL-safe: sidecar is a separate service,
+// MainStreet calls it via HTTP only — no ARTEX code in this repo).
+// ---------------------------------------------------------------------------
+const ARTEX_BASE_URL = process.env.ARTEX_BASE_URL ?? "http://127.0.0.1:8787";
+
+function artexHeaders(): HeadersInit {
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  const token = process.env.ARTEX_API_TOKEN;
+  if (token) headers["Authorization"] = "Bearer " + token;
+  return headers;
+}
+
+async function artexFetch(path: string, init?: RequestInit): Promise<unknown> {
+  const res = await fetch(`${ARTEX_BASE_URL}${path}`, {
+    ...init,
+    headers: { ...artexHeaders(), ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error("ARTEX " + (init?.method ?? "GET") + " " + path + " failed (" + res.status + "): " + body);
+  }
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
 // ClineCore singleton — one local, in-process runtime for the MSS Agent.
 // Created lazily on first chat turn so `tsc`/`build` never execute the SDK.
 // ---------------------------------------------------------------------------
@@ -265,6 +290,12 @@ MSS-specific tools:
 - save_workflow — Creates a new workflow owned by the user's company. Input: { name: string, steps: Array<{ name: string, tool?: string, target?: string, order?: number }> }. Returns the created workflow with id + steps. Use when the user asks to create, build, or describe a new workflow.
 - list_findings — Returns all attack evidence findings owned by the user's company (id, title, accessType, target, status, humanNote). Use when the user asks about past findings, credentials, or proof of access.
 - create_finding — Stores attack evidence for a completed action. Input: { title, accessType: "ssh"|"http"|"database"|"command"|"other", target, credentials?, evidence?, assetId?, workflowId?, stepId? }. Use after gaining access (SSH, HTTP, etc.) to record proof for human review.
+
+ARTEX orchestration tools (call ARTEX sidecar at 127.0.0.1:8787 via HTTP):
+- artex_scan_start — Start an ARTEX scan on an in-scope asset target. Input: { target, scanType?, options? }. Verify target is in CompanyAsset with inScope === true before calling. Returns { taskId, status, target }.
+- artex_scan_status — Check status of a running ARTEX task. Input: { taskId }. Returns { taskId, status, progress }.
+- artex_scan_results — Retrieve findings from a completed ARTEX task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.
+- artex_scan_stop — Stop a running ARTEX task. Input: { taskId }. Returns { taskId, stopped: true }.
 
 Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
@@ -518,6 +549,131 @@ export function mssTools(userId: string): AgentTool[] {
             target: finding.target,
             status: finding.status,
           },
+        };
+      },
+    },
+    {
+      name: "artex_scan_start",
+      description:
+        "Start an ARTEX scan on an in-scope asset target. Input: { target, scanType?, options? }. Verify target is in CompanyAsset with inScope === true before calling. Returns { taskId, status, target }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "Host, IP, or URL to scan (must be in scope)" },
+          scanType: { type: "string", description: "Scan type: network, web, or full (default: network)" },
+          options: { type: "object", description: "Optional passthrough config for ARTEX task" },
+        },
+        required: ["target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { target, scanType = "network", options } = input as {
+          target: string;
+          scanType?: string;
+          options?: Record<string, unknown>;
+        };
+
+        // Safety: verify target is in scope and owned by user's company
+        const asset = await db.companyAsset.findFirst({
+          where: {
+            target,
+            inScope: true,
+            company: { userId },
+          },
+        });
+        if (!asset) {
+          return {
+            error:
+              "Target not in scope or not owned by your company: " + target,
+          };
+        }
+
+        const result: any = await artexFetch("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({ target, scanType, options }),
+        });
+        return {
+          taskId: result.id,
+          status: result.status,
+          target,
+        };
+      },
+    },
+
+    {
+      name: "artex_scan_status",
+      description:
+        "Check status of a running ARTEX task. Input: { taskId }. Returns { taskId, status, progress }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "ARTEX task id" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+        const result: any = await artexFetch("/api/tasks/" + encodeURIComponent(taskId));
+        return {
+          taskId,
+          status: result.status,
+          progress: result.progress,
+        };
+      },
+    },
+
+    {
+      name: "artex_scan_results",
+      description:
+        "Retrieve findings from a completed ARTEX task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "ARTEX task id" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+        const result: any = await artexFetch("/api/exploration/findings");
+        const findings = Array.isArray(result) ? result : result.findings ?? [];
+        return {
+          taskId,
+          findings: findings
+            .filter((f: any) => f.taskId === taskId || !taskId)
+            .map((f: any) => ({
+              target: f.target,
+              type: f.type,
+              severity: f.severity,
+              evidence: f.evidence,
+            })),
+        };
+      },
+    },
+
+    {
+      name: "artex_scan_stop",
+      description:
+        "Stop a running ARTEX task. Input: { taskId }. Returns { taskId, stopped: true }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "ARTEX task id" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+        const result: any = await artexFetch("/api/tasks/" + encodeURIComponent(taskId) + "/control", {
+          method: "POST",
+          body: JSON.stringify({ action: "stop" }),
+        });
+        return {
+          taskId,
+          stopped: true,
         };
       },
     },
