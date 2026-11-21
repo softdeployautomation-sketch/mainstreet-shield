@@ -255,6 +255,7 @@ export function AgentChat() {
             delta?: string;
             reasoning?: string;
             end?: boolean;
+            contentType?: string;
             toolName?: string;
             input?: unknown;
             output?: unknown;
@@ -287,6 +288,24 @@ export function AgentChat() {
                 ),
               );
             }
+          } else if (eventType === "content_start") {
+            // T2: server sends content_start with { contentType: "reasoning", reasoning: "..." }
+            if (
+              p.contentType === "reasoning" &&
+              typeof p.reasoning === "string" &&
+              !p.end
+            ) {
+              accumulatedThinking.push(p.reasoning);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, thinking: [...accumulatedThinking] }
+                    : m,
+                ),
+              );
+            }
+          } else if (eventType === "iteration_start") {
+            // T2: ignore — no UI output needed
           } else if (eventType === "tool-call") {
             accumulatedTools.push({ toolName: p.toolName ?? "tool", input: p.input });
             setMessages((prev) =>
@@ -318,7 +337,25 @@ export function AgentChat() {
                   : m,
               ),
             );
-            if (p.sessionId) setSessionId(p.sessionId);
+            if (p.sessionId) {
+              const newSessionId = p.sessionId;
+              setSessionId(newSessionId);
+              // T1: append new session to local list, dedupe by id
+              setSessions((prev) => {
+                if (prev.some((s) => s.id === newSessionId)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: newSessionId,
+                    title: text.slice(0, 60),
+                    status: "new",
+                    startedAt: new Date().toISOString(),
+                  },
+                ];
+              });
+              // Refresh from DB to reflect title/status after creation
+              void fetchSessions();
+            }
             if (p.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
           } else if (eventType === "error") {
             setError(p.message || "Chat failed");
@@ -432,7 +469,7 @@ export function AgentChat() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={endRef}>
+      <div className="flex-1 max-h-[60vh] overflow-y-auto p-4 space-y-4" ref={endRef}>
         {messages.length === 0 && (
           <div className="text-xs text-fg-muted text-center mt-10">
             Ask the MSS Agent about security research, VM commands, or workflows.
