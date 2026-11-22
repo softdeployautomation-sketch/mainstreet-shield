@@ -1449,11 +1449,13 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           timestamp: now(),
         });
 
-        const startResult: any = await artexFetch("/api/tasks", {
-          method: "POST",
-          body: JSON.stringify({ target, scanType, options: { goal: `scan ${target}` } }),
+        const startResult: any = await artexMCPCall("artex_scan_start", {
+          target,
+          scanType,
+          goal: `scan ${target}`,
+          options: {},
         });
-        const taskId: string = startResult.id;
+        const taskId: string = startResult.taskId || startResult.id;
 
         events.push({
           type: "scan_started",
@@ -1467,7 +1469,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         let status = "running";
 
         while (Date.now() < deadline) {
-          const statusResult: any = await artexFetch("/api/tasks/" + encodeURIComponent(taskId));
+          const statusResult: any = await artexMCPCall("artex_scan_status", { taskId });
           status = statusResult.status;
           if (status !== "running" && status !== "pending") break;
           await new Promise((r) => setTimeout(r, pollIntervalMs));
@@ -1482,8 +1484,8 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           return { taskId, status: status === "running" ? "timeout" : status, findings: [], events };
         }
 
-        const resultsResult: any = await artexFetch("/api/exploration/findings");
-        const allFindings = Array.isArray(resultsResult) ? resultsResult : resultsResult.findings ?? [];
+        const resultsResult: any = await artexMCPCall("artex_scan_results", { taskId });
+        const allFindings = Array.isArray(resultsResult.findings) ? resultsResult.findings : (Array.isArray(resultsResult) ? resultsResult : []);
         const findings = allFindings
           .filter((f: any) => f.taskId === taskId || !taskId)
           .map((f: any) => ({ target: f.target, type: f.type, severity: f.severity, evidence: f.evidence }));
