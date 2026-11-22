@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 export interface ScanBusEvent {
   sessionId: string;
   taskId: string;
-  type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed";
+  type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed" | "ask_user";
   message: string;
   progress?: number | string;
   currentStep?: string;

@@ -249,7 +249,7 @@ let _cline: ClineCore | null = null;
 let _clineReady = false;
 const _sessionUnsub = new Map<string, () => void>();
 
-async function getCline(): Promise<ClineCore> {
+export async function getCline(): Promise<ClineCore> {
   if (!_cline) {
     _cline = await ClineCore.create({
       clientName: "mainstreet-mss-agent",
@@ -277,7 +277,7 @@ export interface ClineCredentials {
   modelId?: string;
 }
 
-async function resolveClineCredentials(userId: string): Promise<ClineCredentials | null> {
+export async function resolveClineCredentials(userId: string): Promise<ClineCredentials | null> {
   // 1. Stored OAuth access token (decrypted at rest by token-store).
   // Also load the user's saved model preference from UserSettings so the
   // selected model is used even when authenticating via OAuth.
