@@ -57,6 +57,12 @@ export function AgentChat() {
   // Set when the user explicitly starts a new chat, so the auto-load effect
   // doesn't immediately reopen the most recent conversation.
   const newChatRef = useRef(false);
+  // WP1: scan_event bus subscription, tied to the open chat session.
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const scanEventDedupeRef = useRef<Set<string>>(new Set());
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backoffRef = useRef(1000); // ms, starts at 1s
+  const busGenerationRef = useRef(0);
 
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -577,6 +583,118 @@ export function AgentChat() {
   useEffect(() => {
     scrollBottom();
   }, [messages]);
+
+  // WP1: subscribe to the user's scan_event bus while a session is open.
+  // Events are accepted only when event.sessionId === sessionId, so two
+  // concurrent chats never leak scan chips into each other. Duplicates
+  // arriving via both the in-turn stream and the bus are dropped by
+  // taskId|type|message. Reconnects use capped exponential backoff (1s→15s);
+  // the connection closes on unmount / session switch.
+  useEffect(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    scanEventDedupeRef.current = new Set();
+    backoffRef.current = 1000;
+
+    if (!sessionId) return;
+
+    const generation = ++busGenerationRef.current;
+
+    const connect = (): void => {
+      if (generation !== busGenerationRef.current) return;
+
+      const es = new EventSource("/api/mss/agent/events");
+      eventSourceRef.current = es;
+
+      es.onmessage = (ev: MessageEvent): void => {
+        if (generation !== busGenerationRef.current) return;
+
+        let msg: unknown;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return; // skip heartbeat comments and malformed frames
+        }
+
+        const e = msg as {
+          type?: string;
+          sessionId?: string;
+          taskId?: string;
+          message?: string;
+          progress?: number | string;
+          currentStep?: string;
+        } | null;
+        if (!e || e.type !== "scan_event" || e.sessionId !== sessionId) return;
+
+        const dedupeKey = `${e.taskId ?? ""}|${e.type ?? ""}|${e.message ?? ""}`;
+        if (scanEventDedupeRef.current.has(dedupeKey)) return;
+        scanEventDedupeRef.current.add(dedupeKey);
+        if (scanEventDedupeRef.current.size > 1000) {
+          scanEventDedupeRef.current.clear();
+        }
+
+        const scanEvent: ScanEvent = {
+          type: e.type as ScanEvent["type"],
+          message: e.message ?? "",
+          ...(e.taskId ? { taskId: e.taskId } : {}),
+          ...(e.progress !== undefined ? { progress: e.progress } : {}),
+          ...(e.currentStep ? { currentStep: e.currentStep } : {}),
+        };
+
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant") {
+            return [
+              ...prev.slice(0, -1),
+              { ...last, scanEvents: [...(last.scanEvents ?? []), scanEvent] },
+            ];
+          }
+          return [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: scanEvent.message,
+              scanEvents: [scanEvent],
+            },
+          ];
+        });
+        scrollBottom();
+      };
+
+      es.onerror = (): void => {
+        es.close();
+        if (eventSourceRef.current === es) {
+          eventSourceRef.current = null;
+        }
+        if (generation !== busGenerationRef.current) return;
+        // Capped exponential backoff: 1s → 2s → … → 15s cap.
+        reconnectTimerRef.current = setTimeout(() => {
+          connect();
+        }, backoffRef.current);
+        backoffRef.current = Math.min(backoffRef.current * 2, 15_000);
+      };
+    };
+
+    connect();
+
+    return (): void => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [sessionId]);
 
   const sessionLabel = sessionTitle || (sessionId ? "Chat" : "Sessions");
 

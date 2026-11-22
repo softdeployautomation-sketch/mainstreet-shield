@@ -334,9 +334,20 @@ target AI model (API or local)
 | 2B | Asset write tools, workflow builder, lab console | Task Agent / SVE |
 | 2C | Chat fixes (session refresh, delete, ordering, missing messages, asset "other") | Task Agent — **DONE** |
 | 3 | ARTEX offensive orchestration (sidecar, HTTP contract) | Task Agent / SVE — **DONE** |
+| 3.5 | **MCP mesh + chat session binding** — `TASK_258_TASK_AGENT_ASSIGNMENT.md` (WP1–WP4, stop points S1–S4) | Task Agent / SVE — **PRIORITY, READY** |
 | 4 | Glossopetrae sidecar integration + AI model security testing | Task Agent / SVE |
 | 5 | Defense (D-1..D-4 monitoring/alarms) | SVE |
+| 6 | **UI & design system overhaul** — `TASK_259_UI_DESIGN_SYSTEM.md` (UI-1..UI-6) | Task Agent / SVE — **SCOPED, LATER** |
 
 ---
 
-*End of v3.1 — Disaster Recovery (§7) + Glossopetrae (§8) added. Next: owner reviews §7/§8, then deploy main, SVE runs prisma db push on VPS.*
+## 10. Batch 3.5 (MCP mesh) and Batch 6 (UI) — new plans
+
+- **Batch 3.5 — priority.** Full assignment: `task/TASK_258_TASK_AGENT_ASSIGNMENT.md`.
+  Scope: WP1 session-binding layer (`AgentScanLink`/`AgentScanEvent`, `resolveChatTarget`, user `scan_event` SSE bus) → WP2 ARTEX MCP server at `:8787/mcp` (5 fixed tools, `ARTEX_MCP_TOKEN`) → WP3 ARTEX `mss_complete` provider (no LLM key in ARTEX) → WP4 deploy/E2E runbook (SVE executes). Every WP stops for SVE verification (S1–S4). Contracts C1–C5 frozen.
+- **Batch 6 — later, after 3.5.** Full scope: `task/TASK_259_UI_DESIGN_SYSTEM.md`.
+  Scope: audit (305 hardcoded zinc/emerald utilities), token expansion (role-based surfaces/lines/ink/status/charts/shape/motion), primitives, app shell, modern agent-chat (message-part model, named tool cards, live reasoning, scan chips, approvals, stop/steer, artifacts, sanitized markdown, a11y), dashboard/product screens, visual QA. Milestones UI-1..UI-6, each with an SVE stop. Research sources cited in the doc.
+
+---
+
+*End of v3.2 — §10 added: Batch 3.5 MCP mesh assignment (priority) + Batch 6 UI design system (scoped, later).*

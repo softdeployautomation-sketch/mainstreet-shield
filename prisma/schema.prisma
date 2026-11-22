@@ -387,3 +387,41 @@ model ClineAuthSession {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+// ---------------------------------------------------------------------------:
+// AgentScanLink — pins an ARTEX MCP task to a chat session for life.
+// Session resolution: explicit session → AgentScanLink(taskId) → user's last
+// MssAgentSession → error. One taskId = exactly one chatSessionId (chat-origin
+// scans pin their session; workflow/api scans fall back to the last session).
+// ---------------------------------------------------------------------------:
+model AgentScanLink {
+  id            String   @id @default(cuid())
+  taskId        String   @unique
+  chatSessionId String
+  userId        String
+  origin        String   // "chat" | "workflow" | "api"
+  source        String?
+  createdAt     DateTime @default(now())
+
+  @@index([chatSessionId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------:
+// AgentScanEvent — persisted copy of every user-facing scan_event (C4).
+// Best-effort persistence from lib/mss/scan-events.ts; never blocks a turn.
+// The user+session fan-out lives in the in-memory bus; this table is the
+// durable record (chips survive reload via the Cline transcript + this log).
+// ---------------------------------------------------------------------------:
+model AgentScanEvent {
+  id          String   @id @default(cuid())
+  taskId      String
+  type        String   // scan_started | scan_progress | scan_completed | scan_failed
+  message     String
+  progress    String?
+  currentStep String?
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([taskId, createdAt])
+}

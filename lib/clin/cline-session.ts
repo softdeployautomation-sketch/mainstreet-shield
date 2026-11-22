@@ -17,6 +17,8 @@ import type { AgentTool } from "@cline/shared";
 import { getClineOAuthToken, clearClineAuthSession } from "@/lib/clin/token-store";
 import { decryptSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
+import { publishScanEvent } from "@/lib/mss/scan-events";
 
 // ---------------------------------------------------------------------------
 // ARTEX sidecar HTTP contract (AGPL-safe: sidecar is a separate service,
@@ -65,10 +67,56 @@ function setTurnHandler(sessionId: string, handler: OnClineEvent | null): void {
 
 function emitScanEvent(
   sessionId: string,
+  userId: string,
   type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed",
   data: unknown,
 ): void {
+  // Phase 0: in-turn chat SSE (per-turn handlers; no cross-session leakage).
   _turnHandlers.get(sessionId)?.({ type, data } as ClineStreamEvent);
+
+  // WP1: when the event carries an ARTEX taskId, durably persist it and fan
+  // it out to the user's SSE bus (C4: scan_event { sessionId, taskId, type,
+  // message, progress?, currentStep? }). Events without a taskId (e.g.
+  // out-of-scope target) stay in-turn only.
+  const d = data as {
+    taskId?: string;
+    message?: string;
+    error?: string;
+    progress?: unknown;
+    currentStep?: string;
+  } | null;
+  const taskId = d?.taskId;
+  if (!taskId) return;
+
+  const rawProgress = d.progress;
+  const progress =
+    typeof rawProgress === "number" ? String(rawProgress) : typeof rawProgress === "string" ? rawProgress : undefined;
+  const currentStep = d.currentStep;
+  const message = d.message ?? d.error ?? "";
+
+  void db.agentScanEvent
+    .create({
+      data: {
+        taskId,
+        type,
+        message,
+        progress,
+        currentStep: currentStep ?? undefined,
+        payload: d as unknown as Prisma.InputJsonValue,
+      },
+    })
+    .catch(() => {
+      // best-effort persistence; never fail a scan turn
+    });
+
+  publishScanEvent(userId, {
+    sessionId,
+    taskId,
+    type,
+    message,
+    ...(progress !== undefined ? { progress } : {}),
+    ...(currentStep !== undefined ? { currentStep } : {}),
+  });
 }
 
 /** Session-missing / unusable errors from ClineCore (cold resume signal). */
@@ -957,7 +1005,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           },
         });
         if (!asset) {
-          emitScanEvent(sessionId, "scan_failed", {
+          emitScanEvent(sessionId, userId, "scan_failed", {
             target,
             scanType,
             message: `Target not in scope or not owned by your company: ${target}`,
@@ -972,9 +1020,27 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             target,
             scanType,
             goal,
+            // C1: chat-origin scans pin meta incl. the chat session id.
+            meta: { origin: "chat", chatSessionId: sessionId, userId, source: "mss-agent-chat" },
           });
           const taskId: string = result.taskId;
-          emitScanEvent(sessionId, "scan_started", {
+          // WP1: pin this task to the chat session for life (exactly one link).
+          try {
+            await db.agentScanLink.upsert({
+              where: { taskId },
+              update: { chatSessionId: sessionId, userId, origin: "chat", source: "mss-agent-chat" },
+              create: {
+                taskId,
+                chatSessionId: sessionId,
+                userId,
+                origin: "chat",
+                source: "mss-agent-chat",
+              },
+            });
+          } catch {
+            // best-effort binding — the scan is already running in ARTEX
+          }
+          emitScanEvent(sessionId, userId, "scan_started", {
             target,
             scanType,
             taskId,
@@ -982,7 +1048,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           });
           return { taskId };
         } catch (err) {
-          emitScanEvent(sessionId, "scan_failed", {
+          emitScanEvent(sessionId, userId, "scan_failed", {
             target,
             scanType,
             error: err instanceof Error ? err.message : String(err),
@@ -1014,7 +1080,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           const result: any = await artexMCPCall("artex_scan_status", { taskId });
           const progress = result.progress ?? 0;
           if (result.status === "running" || result.status === "pending") {
-            emitScanEvent(sessionId, "scan_progress", {
+            emitScanEvent(sessionId, userId, "scan_progress", {
               taskId,
               progress,
               currentStep: result.currentStep ?? result.status,
@@ -1027,7 +1093,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             progress,
           };
         } catch (err) {
-          emitScanEvent(sessionId, "scan_failed", {
+          emitScanEvent(sessionId, userId, "scan_failed", {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -1057,7 +1123,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         try {
           const result: any = await artexMCPCall("artex_scan_results", { taskId });
           const findings = Array.isArray(result.findings) ? result.findings : [];
-          emitScanEvent(sessionId, "scan_completed", {
+          emitScanEvent(sessionId, userId, "scan_completed", {
             taskId,
             findings,
             message: `✅ Scan completed — ${findings.length} findings`,
@@ -1072,7 +1138,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             })),
           };
         } catch (err) {
-          emitScanEvent(sessionId, "scan_failed", {
+          emitScanEvent(sessionId, userId, "scan_failed", {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -1103,7 +1169,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           await artexMCPCall("artex_scan_stop", { taskId });
           return { taskId, stopped: true };
         } catch (err) {
-          emitScanEvent(sessionId, "scan_failed", {
+          emitScanEvent(sessionId, userId, "scan_failed", {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
