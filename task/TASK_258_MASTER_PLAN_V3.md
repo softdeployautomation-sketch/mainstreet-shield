@@ -350,4 +350,88 @@ target AI model (API or local)
 
 ---
 
-*End of v3.2 — §10 added: Batch 3.5 MCP mesh assignment (priority) + Batch 6 UI design system (scoped, later).*
+## 11. WP5 — MSS Agent as ARTEX-Equivalent Orchestrator (replaces Batch 3.5 MCP mesh)
+
+**Status:** APPROVED — owner decision 2026-11-22
+**Owner:** Task Agent implements; SVE verifies + deploys
+
+### Why the change
+The original Batch 3.5 plan (MCP mesh → ARTEX sidecar as task backend) had three unresolvable blockers:
+
+| Blocker | Detail |
+|---------|--------|
+| Language boundary | ARTEX is Go; MSS is TypeScript. Cannot import `plannerLoop`/`workerLoop`/`captureRun` into TypeScript. WASM lacks goroutines/threads for concurrent loops. |
+| DB schema divergence | ARTEX uses raw `pgx` schema (`explorations`, `intents`, `findings`, `activities`, `worker_traces`). MSS uses Prisma (`CompanyAsset`, `AgentFinding`, `MssAgentSession`, `AgentScanLink`). No shared tables. |
+| LLM provider mismatch | ARTEX uses `norma/agentcore` + `mcpProvider` → `mss_complete`. MSS uses `@cline/sdk` directly. Different streaming models, tool schemas, and LLM abstractions. |
+
+### Revised architecture
+**MSS agent becomes an ARTEX-equivalent orchestrator.** All ARTEX capabilities are ported as native TypeScript `extraTools` on the Cline SDK `core.send()` call. No HTTP/MCP calls to ARTEX. No Go/TypeScript boundary. No DB schema conflict.
+
+```
+MSS Agent (Cline SDK core.send + mss_* extraTools)
+        │
+        ▼
+mss_plan_scan(target, goal) → intent steps (planner port)
+mss_execute_scan_step(stepId) → run one step, write facts (worker port)
+mss_get_scan_results(taskId) → accumulated findings
+mss_insert_assets(assets[]) → Prisma CompanyAsset
+mss_add_finding(...) → Prisma AgentFinding
+mss_list_findings() → Prisma AgentFinding
+mss_list_assets() → Prisma CompanyAsset
+mss_steer_scan(taskId, msg) → real-time course correction
+mss_stop_scan(taskId) → cancel running scan
+mss_graph_overview(taskId) → exploration graph view
+        │
+        ▼
+WP1 SSE bus → chat (scan_started / scan_progress / scan_completed / scan_failed)
+        │
+        ▼
+Prisma: AgentFinding, CompanyAsset, AgentScanLink, AgentScanEvent
+```
+
+### ARTEX sidecar after WP5
+- Kept running on VPS (may still be used by other consumers)
+- `MSS_COMPLETE_URL` / `MSS_COMPLETE_USER_ID` env vars can be removed (ARTEX no longer called by MSS)
+- `ARTEX_MCP_TOKEN` stays (MCP server still available if needed)
+- MSS does NOT call ARTEX MCP or REST endpoints
+
+### Tools to implement (in `lib/clin/cline-session.ts` `mssTools()`)
+
+| Tool | Input | Output | Prisma write |
+|------|-------|--------|--------------|
+| `mss_plan_scan` | `{ target, goal?, scanType? }` | `{ intentSteps: [{stepId, type, description, target}], taskId }` | AgentScanLink upsert |
+| `mss_execute_scan_step` | `{ taskId, stepId }` | `{ findings: [{target, type, severity, evidence}], progress, currentStep }` | AgentFinding rows |
+| `mss_get_scan_results` | `{ taskId }` | `{ taskId, status, findings: [...], progress, currentStep }` | read only |
+| `mss_insert_assets` | `{ assets: [{name, type, target, inScope?, groupId?}] }` | `{ results: [{id, name, type}], errors: [...] }` | CompanyAsset rows |
+| `mss_add_finding` | `{ title, accessType, target, credentials?, evidence?, assetId?, workflowId?, stepId? }` | `{ id, status }` | AgentFinding row |
+| `mss_list_findings` | `{}` | `{ findings: [...] }` | read only |
+| `mss_list_assets` | `{}` | `{ assets: [...] }` | read only (already exists) |
+| `mss_steer_scan` | `{ taskId, message }` | `{ ok }` | emit scan_progress event |
+| `mss_stop_scan` | `{ taskId }` | `{ taskId, stopped: true }` | emit scan_failed event |
+| `mss_graph_overview` | `{ taskId }` | `{ nodes, edges }` | read only |
+
+### Stopping points (SVE verification gates)
+- **S1:** `mss_plan_scan` + `mss_execute_scan_step` implemented, tsc 0, build 0 — SVE verifies planner/worker port logic
+- **S2:** `mss_insert_assets` + `mss_add_finding` + `mss_list_findings` implemented, prisma validate valid — SVE verifies DB writes
+- **S3:** `mss_steer_scan` + `mss_stop_scan` + `mss_graph_overview` implemented — SVE verifies control plane
+- **S4:** Full E2E on VPS: scan → plan → execute → results → SSE to chat → finding persisted — SVE signs off deploy
+
+### Contracts (frozen)
+- C1: All scan tools verify target is in `CompanyAsset` with `inScope === true` before acting
+- C2: `mss_complete` response shape `{text, finishReason, usage}` unchanged (not used by WP5 but preserved)
+- C3: `mss_ask_user` unchanged (existing WP3 contract)
+- C4: `publishScanEvent` emits `scan_started`/`scan_progress`/`scan_completed`/`scan_failed` to WP1 SSE bus
+- C5: No AGPL code in mainstreet-shield; no LLM keys in ARTEX; ARTEX not called by MSS
+
+### Gates
+| Gate | Expected |
+|------|----------|
+| `npx tsc --noEmit` (mainstreet-shield) | exit 0 |
+| `npm run build` | exit 0 |
+| `npx prisma validate` | valid |
+| `git diff --check` | exit 0 |
+| Secrets scan | none |
+
+---
+
+*End of v3.3 — §11 added: WP5 MSS Agent as ARTEX-Equivalent Orchestrator (replaces Batch 3.5 MCP mesh).*

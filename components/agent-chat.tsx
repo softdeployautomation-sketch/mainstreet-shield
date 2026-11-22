@@ -111,9 +111,15 @@ export function AgentChat() {
       let targetId: string | null = null;
       let targetTitle: string | null = null;
       if (storedSession && !sessionId) {
-        targetId = storedSession;
         const found = rows.find((s) => s.id === storedSession);
-        targetTitle = found?.title ?? null;
+        // Only auto-reopen if the stored session belongs to the current user.
+        // Prevents cross-account session leakage after logout/login.
+        if (found) {
+          targetId = storedSession;
+          targetTitle = found.title ?? null;
+        }
+        // If stored session is not in the current user's list, leave targetId
+        // null so the user picks from their own session list or starts new.
       } else if (!sessionId && rows.length > 0) {
         targetId = rows[0].id;
         targetTitle = rows[0].title ?? null;
