@@ -208,4 +208,134 @@ H-1..H-8 as before; architecture Phase 1 (signed jobs / tenant isolation) folds 
 
 ---
 
-*End of v3.0 — owner Q&A decisions baked in. Next: 2B-1 push, then Batch 2B handoff.*
+---
+
+## 7. Disaster Recovery / VPS Migration Plan (NEW)
+
+**Goal:** If the VPS (`207.244.224.57`) is lost, rebuild the full stack (vantra + spaceworker + mainstreet-shield) on a new server **immediately**, using only nightly DB backups + GitHub. RTO target: under 1 hour from blank VPS to live.
+
+### 7.1 What is backed up nightly (source of truth)
+
+| Backup | Content | Destination | Retention |
+|--------|---------|-------------|-----------|
+| `spaceworker` DB | full dump | R2 `instaweb-db-backups/spaceworker/` | 30 days |
+| `vantra` DB | full dump | R2 `instaweb-db-backups/vantra/` | 30 days |
+| `tacticalrmm` DB | agents/devices | R2 `instaweb-db-backups/tacticalrmm/` | 30 days |
+| `meshcentral` DB | mesh nodes/groups + cookie key | R2 `instaweb-db-backups/meshcentral/` | 30 days |
+| Postgres globals | roles (`pg_dumpall --globals-only`) | R2 `instaweb-db-backups/globals/` | 30 days |
+| Config/secrets | `/opt/*/.env`, TRMM `local_settings.py`, NATS confs, MeshCentral certs/`config.json`/`serverstate.txt`, nginx, systemd units, `/etc/letsencrypt` | R2 `instaweb-db-backups/config/` | 30 days |
+| Small user data | `hosted-sites`, `cyberlab-contexts`, `cyberlab-sessions` | R2 `instaweb-db-backups/spaceworker-data/` | 30 days |
+| Local copy | 3-day rolling | `/root/db-backups` on VPS | 3 days |
+
+Backup runs **03:17 UTC** via `deploy/backup-databases.sh` + `deploy/db-backup.{service,timer}`. Health check every 6h (`db-backup-health.timer`) alerts on Telegram if `_status/last-success.json` is missing or >36h old.
+
+**Excluded on purpose:** `/var/spaceworker/screenshots` (large + sensitive), installers/build artefacts (reproducible).
+
+### 7.2 Restore on a new VPS (step by step)
+
+```bash
+# 0. Provision new Ubuntu VPS, note IP
+# 1. Install prerequisites
+apt update && apt install -y postgresql postgresql-contrib nodejs npm git rclone curl
+
+# 2. Create databases
+sudo -u postgres createdb spaceworker
+sudo -u postgres createdb vantra
+sudo -u postgres createdb tacticalrmm
+sudo -u postgres createdb meshcentral
+sudo -u postgres psql -f /path/to/globals-backup.sql  # roles
+
+# 3. Restore config/secrets from R2
+rclone copy r2backup:instaweb-db-backups/config/ /etc/instaweb-backup/
+# place .env at /opt/spaceworker/.env, /opt/vantra/.env etc.
+# place NATS confs, MeshCentral certs, nginx, systemd units, letsencrypt
+
+# 4. Restore each DB from latest dump
+for db in spaceworker vantra tacticalrmm meshcentral; do
+  latest=$(rclone lsf r2backup:instaweb-db-backups/$db/ | tail -1)
+  rclone cat "r2backup:instaweb-db-backups/$db/$latest" | gunzip | sudo -u postgres psql -v ON_ERROR_STOP=1 -d $db
+done
+
+# 5. Deploy app code from GitHub
+git clone https://github.com/softdeployautomation-sketch/mainstreet-shield.git /opt/mainstreet-shield
+cd /opt/mainstreet-shield && git checkout main
+npm install
+
+# 6. Run prisma db push (SVE-owned VPS op)
+npx prisma db push
+
+# 7. Install systemd units from deploy/, enable + start
+# spaceworker.service, vantra.service, nats.service, nats-api.service, meshcentral
+
+# 8. Verify E2E against http://localhost:<port>
+curl http://localhost:3000/api/health
+```
+
+### 7.3 Verification checklist after restore
+
+- [ ] All 4 DBs have expected table counts (`psql -c "\dt" | wc -l`)
+- [ ] `prisma db push` exit 0 (schema matches DB)
+- [ ] `npm run build` exit 0
+- [ ] All systemd services active (`systemctl is-active`)
+- [ ] `db-backup.timer` active and last-triggered within 24h
+- [ ] E2E: login → list assets → send chat message → verify response
+
+---
+
+## 8. Glossopetrae — AI Model Security Testing (NEW, Sidecar Only)
+
+### 8.1 What it is
+
+**GLOSSOPETRAE v3.1** — "Procedural Xenolinguistics Engine" by `elder-plinius` (GitHub: `elder-plinius/GLOSSOPETRAE`, 1.1k stars). A **linguistic engine for AI** that forges procedural languages/conlangs and uses them to test AI models for security vulnerabilities — effectively an **AI model cracker**.
+
+**License: AGPL-3.0** — same restriction class as ARTEX. **Must NOT be merged into mainstreet-shield app source.** Runs as a **separate sidecar service** with an HTTP contract to the mainstreet-shield agent.
+
+### 8.2 Capabilities relevant to MainStreet Shield
+
+| Capability | What it does | Security testing use |
+|------------|-------------|---------------------|
+| Procedural language generation | Forges novel conlangs (grammar, phonology, lexicon, script) | Test if models leak data via novel languages safety monitors don't recognize |
+| Tokenizer exploitation (`TokenExploiter.js`) | BPE tokenization asymmetries as covert side channels | Test for tokenizer-level exploits / data exfiltration |
+| Steganography (`SteganographyEngine.js`, `SemanticStego.js`) | 8-channel covert linguistic stego (synonym, morpheme, word-order, null-morpheme, register) | Test data exfiltration through innocent-looking text |
+| Blind-spot mapping | ~250 exploitable instances across 49/66 model pairs | Map which models are vulnerable to which linguistic attacks |
+| Red team / safety generalization | Tests whether safety training generalizes to novel languages | Evaluate if model jailbreak resistance holds across languages |
+| Detection research | Measures what monitors can/cannot see; stego channel testing | Validate our own detection/monitoring blind spots |
+| GLOSSOPETRAE-BENCH | Contamination-free evaluation suite | Benchmark model security posture |
+
+### 8.3 Integration architecture (sidecar pattern)
+
+```
+mainstreet-shield agent (Next.js app)
+        │ HTTP contract
+        ▼
+glossopetrae sidecar (separate service, AGPL-3.0)
+        │ spawns / tests
+        ▼
+target AI model (API or local)
+```
+
+- Agent sends test goal → sidecar runs glossopetrae test suite → returns findings (exploit found / not found, channel type, severity)
+- Agent records results in `ReportDocument` (linked to asset group), versioned
+- No AGPL code in mainstreet-shield repo — sidecar is cloned/deployed separately on VPS
+
+### 8.4 Research sources
+
+- https://github.com/elder-plinius/GLOSSOPETRAE (repo, AGPL-3.0)
+- https://elder-plinius.github.io/GLOSSOPETRAE/ (launch page / web UI)
+- Repo includes: `PAPER.md` (full paper), `bench/`, `redteam/`, `validation/`, `src/Glossopetrae.js`, `src/modules/` (17 generative modules)
+
+---
+
+## 9. Updated batch roadmap (with glossopetrae)
+
+| Batch | Focus | Owner |
+|-------|-------|-------|
+| 2B | Asset write tools, workflow builder, lab console | Task Agent / SVE |
+| 2C | Chat fixes (session refresh, delete, ordering, missing messages, asset "other") | Task Agent — **DONE** |
+| 3 | ARTEX offensive orchestration (sidecar, HTTP contract) | Task Agent / SVE — **DONE** |
+| 4 | Glossopetrae sidecar integration + AI model security testing | Task Agent / SVE |
+| 5 | Defense (D-1..D-4 monitoring/alarms) | SVE |
+
+---
+
+*End of v3.1 — Disaster Recovery (§7) + Glossopetrae (§8) added. Next: owner reviews §7/§8, then deploy main, SVE runs prisma db push on VPS.*
