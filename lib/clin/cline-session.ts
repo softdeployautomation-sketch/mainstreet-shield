@@ -179,6 +179,25 @@ async function artexMCPCall(toolName: string, args: Record<string, unknown>): Pr
 
   const contentType = res.headers.get("content-type") ?? "";
 
+  // Parse an MCP tool result: unwrap { content: [{ text: "JSON", type: "text" }] }
+  // into the parsed JSON object, or return the raw result if it's already shaped.
+  function unwrapMCPResult(result: unknown): unknown {
+    if (result && typeof result === "object" && "content" in result) {
+      const content = (result as { content: Array<{ text?: string; type?: string }> }).content;
+      if (Array.isArray(content) && content.length > 0) {
+        const text = content[0].text;
+        if (typeof text === "string") {
+          try {
+            return JSON.parse(text);
+          } catch {
+            // fall through to return raw result
+          }
+        }
+      }
+    }
+    return result;
+  }
+
   // Direct JSON-RPC response.
   if (contentType.includes("application/json") && !contentType.includes("text/event-stream")) {
     const json = (await res.json()) as {
@@ -192,7 +211,7 @@ async function artexMCPCall(toolName: string, args: Record<string, unknown>): Pr
         `ARTEX MCP ${toolName} error: ${json.error.message ?? JSON.stringify(json.error)}`,
       );
     }
-    return json.result;
+    return unwrapMCPResult(json.result);
   }
 
   // Event-stream response: read SSE until the message matching our JSON-RPC id.
@@ -230,7 +249,7 @@ async function artexMCPCall(toolName: string, args: Record<string, unknown>): Pr
               `ARTEX MCP ${toolName} error: ${payload.error.message ?? JSON.stringify(payload.error)}`,
             );
           }
-          return payload.result;
+          return unwrapMCPResult(payload.result);
         }
       }
     }
