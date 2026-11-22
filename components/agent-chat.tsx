@@ -517,7 +517,7 @@ export function AgentChat() {
                   ? {
                       ...m,
                       content: p.response ?? accumulatedContent,
-                      thinking: p.thinking ?? accumulatedThinking,
+                      thinking: [], // clear accumulated thinking — model is done
                       tools: accumulatedTools,
                       scanEvents: p.scanEvents ?? accumulatedScanEvents,
                     }
@@ -547,7 +547,25 @@ export function AgentChat() {
             if (p.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
             scrollBottom();
           } else if (eventType === "error") {
-            setError(p.message || "Chat failed");
+            // Only surface "Chat failed" if nothing was actually delivered this stream.
+            // If content/thinking/tools/scanEvents were already accumulated, the agent
+            // responded — suppress the false failure banner.
+            const nothingDelivered =
+              !accumulatedContent &&
+              accumulatedThinking.length === 0 &&
+              accumulatedTools.length === 0 &&
+              accumulatedScanEvents.length === 0;
+            if (nothingDelivered) {
+              setError(p.message || "Chat failed");
+            } else {
+              // stream ended with an error event after content — clear thinking so the
+              // MODEL THINKING panel resolves cleanly instead of staying stuck
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, thinking: [] } : m,
+                ),
+              );
+            }
           } else {
             // Catch-all: unknown event types — try to extract any reasoning text
             const maybeReasoning = (p as { reasoning?: string; text?: string; content?: string }).reasoning ?? (p as { reasoning?: string; text?: string; content?: string }).text;

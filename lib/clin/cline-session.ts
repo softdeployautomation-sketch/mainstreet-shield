@@ -1482,14 +1482,23 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           timestamp: now(),
         });
 
-        const maxWaitMs = 120000;
+        const maxWaitMs = parseInt(process.env.ARTEX_SCAN_MAX_WAIT_MS ?? "600000", 10); // default 10 min for autonomous scans
         const pollIntervalMs = 5000;
         const deadline = Date.now() + maxWaitMs;
         let status = "running";
+        let lastProgress = 0;
 
         while (Date.now() < deadline) {
           const statusResult: any = await artexMCPCall("artex_scan_status", { taskId });
           status = statusResult.status;
+          const progress = statusResult.progress ?? lastProgress;
+          lastProgress = progress;
+          emitScanEvent(sessionId, userId, "scan_progress", {
+            taskId,
+            progress,
+            currentStep: statusResult.currentStep ?? status,
+            message: `⏳ Scan ${progress}% — ${statusResult.currentStep ?? status}`,
+          });
           if (status !== "running" && status !== "pending") break;
           await new Promise((r) => setTimeout(r, pollIntervalMs));
         }
