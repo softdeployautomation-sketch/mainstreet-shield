@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -16,7 +16,7 @@ import {
 import type { AgentTool } from "@cline/shared";
 
 import { getClineOAuthToken, clearClineAuthSession } from "@/lib/clin/token-store";
-import { decryptSecret } from "@/lib/crypto";
+import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { publishScanEvent } from "@/lib/mss/scan-events";
@@ -582,12 +582,43 @@ MSS-specific tools:
 - create_finding — Stores attack evidence for a completed action. Input: { title, accessType: "ssh"|"http"|"database"|"command"|"other", target, credentials?, evidence?, assetId?, workflowId?, stepId? }. Use after gaining access (SSH, HTTP, etc.) to record proof for human review.
 - mss_plan_scan — Plan a scan on an in-scope target (native planner port — no ARTEX). Input: { target, goal?, scanType? }. Verify target is in CompanyAsset with inScope === true. Upserts AgentScanLink, emits scan_started. Returns { taskId, intentSteps: [{stepId, type, description, target}] }.
 - mss_execute_scan_step — Execute ONE scan step using Cline shell tools (curl, nslookup, dig, safe HTTP probes). Input: { taskId, stepId }. Inserts AgentFinding rows (status open), emits scan_progress. Returns { findings, progress, currentStep }.
+- mss_nmap_scan — Run nmap against an in-scope target. Input: { taskId, target }. Runs nmap -oX <file> -T3 <target> via runSafe(), saves XML output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_nuclei_scan — Run nuclei against an in-scope target. Input: { taskId, target }. Runs nuclei -jsonl -o <file> -rate-limit 1 <target> via runSafe(), saves JSONL output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_ffuf_scan — Run ffuf against an in-scope target. Input: { taskId, target }. Runs ffuf -of json -o <file> -rate 1 -t 1 -u <target>/FUZZ via runSafe(), saves JSON output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_httpx_scan — Run httpx against an in-scope target. Input: { taskId, target }. Runs httpx -json -o <file> -rl 1 <target> via runSafe(), saves JSON output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_katana_scan — Run katana against an in-scope target. Input: { taskId, target }. Runs katana -o <file> <target> via runSafe(), saves output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_dalfox_scan — Run dalfox against an in-scope target. Input: { taskId, target }. Runs dalfox --rate-limit 1 <target> via runSafe(), saves output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_sqlmap_scan — Run sqlmap against an in-scope target. Input: { taskId, target }. Runs sqlmap --delay 1 --batch <target> via runSafe(), saves output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_hydra_scan — Run hydra against an in-scope target. Input: { taskId, target }. Runs hydra ... <target> via runSafe(), saves output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_masscan_scan — Run masscan against an in-scope target. Input: { taskId, target }. Runs masscan ... <target> via runSafe(), saves output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_bbot_scan — Run bbot against an in-scope target. Input: { taskId, target }. Runs bbot ... <target> via runSafe(), saves JSONL output to temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.
+- mss_ingest_scan_output — Parse scanner output → CompanyAsset + AgentFinding. Input: { taskId, format: "nmap-xml"|"nuclei-jsonl"|"httpx-json"|"ffuf-json", path }. Verifies ownership (C1) + in-scope (C2). Parses scanner output deterministically (no LLM). Emits scan_progress. Returns { ok, assetsCreated, findingsCreated }. No ARTEX calls.
+- mss_ingest_bbot — Parse bbot JSONL → CompanyAsset + AgentFinding. Input: { taskId, path }. scope_distance===0→asset; >0→third-party intel fact. Verifies ownership (C1) + in-scope (C2). Emits scan_progress. Returns { ok, assetsCreated, factsCreated, thirdPartyFacts }. No ARTEX calls.
+- mss_set_goals — Define engagement goals. Input: { taskId, goals: string[] }. Verifies AgentScanLink ownership (C1), stores goals in AgentScanLink.source as JSON, emits scan_progress. Returns { ok: true }.
+- mss_set_constraints — Set allow/deny bounding (highest priority red lines). Input: { taskId, allow: string[], deny: string[] }. Verifies ownership, stores constraints in AgentScanLink.source, emits scan_progress. Returns { ok: true }.
+- mss_add_intent — Add a planned scan direction. Input: { taskId, intent: string, target?: string }. Verifies ownership, appends intent to AgentScanLink.source, emits scan_progress. Returns { ok: true }.
+- mss_add_hint — Add guidance with traffic references. Input: { taskId, hint: string, trafficRefs?: string[] }. Verifies ownership, appends hint to AgentScanLink.source, emits scan_progress. Returns { ok: true }.
+- mss_record_coverage — Coverage ledger. Input: { taskId, assetId, type: 'tested'|'untested' }. Verifies ownership, creates/updates coverage entry in AgentScanLink.source, emits scan_progress. Returns { ok: true }.
+- mss_expand_digest — Expand cold digest for planning. Input: { taskId }. Read-only; returns stored goals/constraints/intents/hints as { expanded: string[] }. No DB writes, no event emission.
 - mss_insert_assets — Insert in-scope assets for a scan task. Input: { taskId, assets: [{ target, type, ip?, asn?, inScope }] }. Looks up AgentScanLink by taskId, inserts CompanyAsset rows. Emits scan_progress. Returns { inserted: number }.
 - mss_add_finding — Add a finding to a scan task. Input: { taskId, finding: { target, type, severity, evidence, stepId? } }. Inserts AgentFinding row (status open). Emits scan_progress. Returns { findingId }.
 - mss_list_findings — List findings for a scan task. Input: { taskId }. Looks up AgentScanLink by taskId, verifies ownership, returns linked findings. Returns { findings: [...] }.
 - mss_steer_scan — Send a steer/correction message to an active scan task. Input: { taskId, message }. Verifies ownership, emits scan_progress with the steer message. Returns { ok: true }.
 - mss_stop_scan — Stop a scan task. Input: { taskId }. Verifies ownership, emits scan_failed with message \"Scan stopped by user\". Returns { taskId, stopped: true }.
 - mss_graph_overview — Build a graph of assets + findings for a scan task. Input: { taskId }. Verifies ownership, queries CompanyAsset + AgentFinding, builds nodes + edges (finding→asset). Read-only; no DB writes, no event emission. Returns { nodes: [...], edges: [...] }.
+- mss_record_fact — Record a structured observation/fact for a scan task. Input: { taskId, summary, detail, source? }. Verifies ownership (C1), creates AgentFinding row (status open), emits scan_progress. Returns { id, status }.
+- mss_save_task_credential — Save encrypted test credentials for a scan task. Input: { taskId, username, password?, key?, port? }. Verifies ownership (C1), encrypts sensitive fields, stores in AgentScanLink.source. Returns { id, encrypted: true }.
+- mss_list_task_credentials — List saved credentials for a scan task (passwords/keys masked). Input: { taskId }. Verifies ownership (C1). Returns { credentials: [...] }.
+- mss_add_company_scope — Add a company-level in-scope asset. Input: { target, type, inScope? }. Creates CompanyAsset row owned by the user's company. Returns { id }.
+- mss_add_task_scope — Add an in-scope asset to a scan task's scope. Input: { taskId, assetId }. Verifies ownership (C1), adds assetId to AgentScanLink.source scope array. Returns { ok: true }.
+- mss_list_untested_assets — List untested assets for a scan task. Input: { taskId, type?, limit? }. Verifies ownership (C1), queries CompanyAsset for assets not yet marked as tested in the coverage ledger. Returns { assets: [...] }.
+- mss_get_scan_results — Aggregated scan results for a task (read-only, no DB writes, no events). Input: { taskId }. Verifies ownership, reads AgentScanLink.source + AgentFinding rows. Returns { taskId, goals, constraints, intents, hints, coverage, findings }.
+- mss_get_worker_output — Retrieves saved worker output for a scan task. Input: { taskId }. Verifies ownership (C1). Returns { taskId, workerOutput }.
+- mss_get_worker_trace — Retrieves worker execution trace/debug info for a scan task. Input: { taskId }. Verifies ownership (C1). Returns { taskId, traces }.
+- mss_search_worker_traces — Keyword search across all stored worker traces for the authenticated user's company. Input: { keyword }. Returns { results: [{ taskId, stepId, output, timestamp }] }.
+- mss_node_detail — Get detail for a specific finding or asset node. Input: { nodeId }. Looks up AgentFinding by id first, then CompanyAsset. Verifies ownership. Returns { type, data }.
+- mss_list_facts — List recorded facts for a scan task. Input: { taskId }. Verifies ownership (C1), returns AgentFinding rows recorded via mss_record_fact. Returns { facts: [...] }.
+- mss_list_companies — List all companies (admin). Input: {}. Non-admin users see only their own company. Returns { companies: [...] }.
 
 
 Asset write tools (MainStreet company DB):
@@ -603,6 +634,7 @@ Report document tools:
 - update_report_document — Update an existing report document (append content). Input: { id, title?, content? }.
 
 Rules:
+- Set goals, constraints, intents, and hints before calling any scanner tool. Scanner tools without prior goal/constraint setup are unauthorized.
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
 - Prefer explanation and safe validation; ask before any destructive action.
@@ -610,9 +642,30 @@ Rules:
 
 If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").`;
 
-// Run an allow-listed, read-only scan command (dig / nslookup / curl) with a short timeout.
-// Failures are degraded gracefully so a single unavailable binary never aborts a step.
+// Allow-listed commands that runSafe() may execute. dig/nslookup/curl are the
+// original read-only probes; the scanner binaries are the ARTEX port (P1).
+const SCANNER_ALLOW_LIST = new Set([
+  "dig",
+  "nslookup",
+  "curl",
+  "nmap",
+  "nuclei",
+  "ffuf",
+  "httpx",
+  "katana",
+  "dalfox",
+  "sqlmap",
+  "hydra",
+  "masscan",
+  "bbot",
+]);
+
+// Run an allow-listed scan command with a short timeout. Failures are degraded
+// gracefully so a single unavailable binary never aborts a step.
 function runSafe(cmd: string, args: string[]): { ok: boolean; output: string } {
+  if (!SCANNER_ALLOW_LIST.has(cmd)) {
+    return { ok: false, output: `command_not_allowed: ${cmd}` };
+  }
   try {
     const output = execFileSync(cmd, args, {
       encoding: "utf-8",
@@ -627,6 +680,46 @@ function runSafe(cmd: string, args: string[]): { ok: boolean; output: string } {
     };
   }
 }
+
+// Build a temp file path for scanner output, creating parent dirs as needed.
+// Scanner tools write to this path via their -o/-oX flags; P2 ingestion reads it.
+function scanOutputPath(taskId: string, tool: string, ext: string): string {
+  const dir = join(process.cwd(), "tmp", "scans", taskId);
+  mkdirSync(dir, { recursive: true });
+  return join(dir, `${tool}-${Date.now()}.${ext}`);
+}
+
+// Shared shape for AgentScanLink.source (JSON string). Merged across the P0
+// control-layer tools so goals/constraints/intents/hints/coverage live together
+// in one durable column. mss_plan_scan already stores { target, scanType,
+// goal, intentSteps } here; control tools extend it without clobbering.
+interface ScanLinkSource {
+  target?: string;
+  scanType?: string;
+  goal?: string;
+  intentSteps?: Array<{ stepId: string; type: string; description: string; target: string }>;
+  goals?: string[];
+  constraints?: { allow: string[]; deny: string[] };
+  intents?: Array<{ intent: string; target?: string }>;
+  hints?: Array<{ hint: string; trafficRefs?: string[] }>;
+  coverage?: Array<{ assetId: string; type: "tested" | "untested" }>;
+  credentials?: Array<{ id: string; username: string; password?: string; key?: string; port?: number }>;
+  scope?: string[];
+  workerOutput?: string;
+  workerTraces?: Array<{ stepId: string; output: string; timestamp: string }>;
+}
+
+function readLinkSource(link: { source: string | null }): ScanLinkSource {
+  try {
+    const parsed = JSON.parse(link.source ?? "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as ScanLinkSource)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 
 export function mssTools(userId: string, sessionId: string): AgentTool[] {
   return [
@@ -860,6 +953,765 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         return { findings: createdFindings, progress, currentStep, executed: !!step };
       },
     },
+    {
+      name: "mss_set_goals",
+      description:
+        "Define engagement goals for a scan task. Input: { taskId, goals: string[] }. Looks up AgentScanLink by taskId, verifies userId ownership (C1), stores goals in AgentScanLink.source as JSON, emits scan_progress. Returns { ok: true }. Set goals before calling any scanner tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          goals: {
+            type: "array",
+            description: "Engagement goals for this scan task",
+            items: { type: "string" },
+          },
+        },
+        required: ["taskId", "goals"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, goals } = input as {
+          taskId: string;
+          goals?: unknown;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the task's user can set goals
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        source.goals = Array.isArray(goals)
+          ? goals.filter((g): g is string => typeof g === "string")
+          : [];
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "goals_set",
+          message: `🎯 Goals set: ${source.goals.length} goal(s)`,
+          goals: source.goals,
+        });
+
+        return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_set_constraints",
+      description:
+        "Set allow/deny bounding (highest priority red lines) for a scan task. Input: { taskId, allow: string[], deny: string[] }. Verifies ownership, stores constraints in AgentScanLink.source, emits scan_progress. Returns { ok: true }. Set constraints before calling any scanner tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          allow: {
+            type: "array",
+            description: "Allowed targets/actions (bounding box)",
+            items: { type: "string" },
+          },
+          deny: {
+            type: "array",
+            description: "Denied targets/actions (red lines)",
+            items: { type: "string" },
+          },
+        },
+        required: ["taskId", "allow", "deny"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, allow, deny } = input as {
+          taskId: string;
+          allow?: unknown;
+          deny?: unknown;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the task's user can set constraints
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        source.constraints = {
+          allow: Array.isArray(allow)
+            ? allow.filter((a): a is string => typeof a === "string")
+            : [],
+          deny: Array.isArray(deny)
+            ? deny.filter((d): d is string => typeof d === "string")
+            : [],
+        };
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "constraints_set",
+          message: `🚧 Constraints set: ${source.constraints!.allow.length} allow, ${source.constraints!.deny.length} deny`,
+          constraints: source.constraints,
+        });
+
+        return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_add_intent",
+      description:
+        "Add a planned scan direction (intent) for a scan task. Input: { taskId, intent: string, target?: string }. Verifies ownership, appends intent to AgentScanLink.source, emits scan_progress. Returns { ok: true }. Set intents before calling any scanner tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          intent: {
+            type: "string",
+            description: "Planned scan direction",
+          },
+          target: {
+            type: "string",
+            description: "Optional target for this intent",
+          },
+        },
+        required: ["taskId", "intent"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, intent, target } = input as {
+          taskId: string;
+          intent?: unknown;
+          target?: unknown;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the task's user can add intents
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        if (!Array.isArray(source.intents)) source.intents = [];
+        source.intents.push({
+          intent: typeof intent === "string" ? intent : "",
+          target: typeof target === "string" ? target : undefined,
+        });
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "intent_added",
+          message: `➕ Intent added: ${intent}`,
+          intent: { intent: typeof intent === "string" ? intent : "", target: typeof target === "string" ? target : undefined },
+        });
+
+        return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_add_hint",
+      description:
+        "Add guidance with traffic references for a scan task. Input: { taskId, hint: string, trafficRefs?: string[] }. Verifies ownership, appends hint to AgentScanLink.source, emits scan_progress. Returns { ok: true }. Set hints before calling any scanner tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          hint: {
+            type: "string",
+            description: "Guidance hint",
+          },
+          trafficRefs: {
+            type: "array",
+            description: "Optional traffic reference ids",
+            items: { type: "string" },
+          },
+        },
+        required: ["taskId", "hint"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, hint, trafficRefs } = input as {
+          taskId: string;
+          hint?: unknown;
+          trafficRefs?: unknown;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the task's user can add hints
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        if (!Array.isArray(source.hints)) source.hints = [];
+        source.hints.push({
+          hint: typeof hint === "string" ? hint : "",
+          trafficRefs: Array.isArray(trafficRefs)
+            ? trafficRefs.filter((t): t is string => typeof t === "string")
+            : undefined,
+        });
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "hint_added",
+          message: `💡 Hint added: ${hint}`,
+          hint: {
+            hint: typeof hint === "string" ? hint : "",
+            trafficRefs: Array.isArray(trafficRefs)
+              ? trafficRefs.filter((t): t is string => typeof t === "string")
+              : undefined,
+          },
+        });
+
+        return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_record_coverage",
+      description:
+        "Coverage ledger for a scan task. Input: { taskId, assetId, type: 'tested'|'untested' }. Verifies ownership, creates/updates a coverage entry for the asset in AgentScanLink.source, emits scan_progress. Returns { ok: true }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          assetId: {
+            type: "string",
+            description: "CompanyAsset id being recorded",
+          },
+          type: {
+            type: "string",
+            enum: ["tested", "untested"],
+            description: "Coverage type",
+          },
+        },
+        required: ["taskId", "assetId", "type"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, assetId, type } = input as {
+          taskId: string;
+          assetId?: unknown;
+          type?: "tested" | "untested";
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the task's user can record coverage
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        if (!Array.isArray(source.coverage)) source.coverage = [];
+        const idx = source.coverage.findIndex((c) => c.assetId === assetId);
+        const entry: { assetId: string; type: "tested" | "untested" } = {
+          assetId: String(assetId),
+          type: type === "untested" ? "untested" : "tested",
+        };
+        if (idx >= 0) source.coverage[idx] = entry;
+        else source.coverage.push(entry);
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "coverage_recorded",
+          message: `📋 Coverage recorded: ${assetId} -> ${entry.type}`,
+          coverage: entry,
+        });
+
+        return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_expand_digest",
+      description:
+        "Expand cold digest for planning. Input: { taskId }. Read-only: looks up AgentScanLink by taskId, verifies ownership, returns stored goals/constraints/intents/hints expanded as a flat string array for planning. No DB writes, no event emission. Returns { expanded: string[] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the task's user can expand its digest
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        const expanded: string[] = [];
+        for (const g of source.goals ?? []) expanded.push(`GOAL: ${g}`);
+        if (source.constraints) {
+          for (const a of source.constraints.allow) expanded.push(`ALLOW: ${a}`);
+          for (const d of source.constraints.deny) expanded.push(`DENY: ${d}`);
+        }
+        for (const i of source.intents ?? [])
+          expanded.push(`INTENT: ${i.intent}${i.target ? ` [${i.target}]` : ""}`);
+        for (const h of source.hints ?? [])
+          expanded.push(`HINT: ${h.hint}${h.trafficRefs?.length ? ` refs:${h.trafficRefs.join(",")}` : ""}`);
+
+        return { expanded };
+      },
+    },
+
+    {
+      name: "mss_nmap_scan",
+      description:
+        "Run nmap against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs nmap -oX <file> -T3 <target> via runSafe(), saves XML output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "nmap", "xml");
+        const result = runSafe("nmap", ["-oX", outputFile, "-T3", target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "nmap_scan",
+          message: `📡 nmap scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_nuclei_scan",
+      description:
+        "Run nuclei against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs nuclei -jsonl -o <file> -rate-limit 1 <target> via runSafe(), saves JSONL output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "nuclei", "jsonl");
+        const result = runSafe("nuclei", ["-jsonl", "-o", outputFile, "-rate-limit", "1", target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "nuclei_scan",
+          message: `🧬 nuclei scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_ingest_scan_output",
+      description: "Parse scanner output → CompanyAsset + AgentFinding. Verifies ownership (C1) + in-scope (C2). Parses nmap-xml/nuclei-jsonl/httpx-json/ffuf-json (no LLM). Emits scan_progress. Returns { ok, assetsCreated, findingsCreated }. No ARTEX calls.",
+      inputSchema: { type: "object", properties: { taskId: { type: "string" }, format: { type: "string", enum: ["nmap-xml", "nuclei-jsonl", "httpx-json", "ffuf-json"] }, path: { type: "string" } }, required: ["taskId", "format", "path"], additionalProperties: false },
+      execute: async (input: unknown) => {
+        const { taskId, format, path } = input as { taskId: string; format: "nmap-xml" | "nuclei-jsonl" | "httpx-json" | "ffuf-json"; path: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        let content: string; try { content = readFileSync(path, "utf-8"); } catch { return { error: `file_not_readable: ${path}` }; }
+        let assetsCreated = 0; let findingsCreated = 0;
+        const ensureAsset = async (t: string, ty: string): Promise<string | null> => {
+          let a = await db.companyAsset.findFirst({ where: { target: t, companyId: company.id } });
+          if (!a) { a = await db.companyAsset.create({ data: { companyId: company.id, name: t, type: ty, target: t, inScope: true } }); assetsCreated++; }
+          else if (!a.inScope) return null;
+          return a.id;
+        };
+        if (format === "nmap-xml") {
+          for (const b of (content.match(/<host[^>]*>[\s\S]*?<\/host>/g) ?? [])) {
+            const m = b.match(/<address[^>]*ip="([^"]+)"[^>]*>/); if (!m) continue;
+            const ip = m[1]; const aid = await ensureAsset(ip, "network"); if (!aid) return { error: "out_of_scope" };
+            for (const pb of (b.match(/<port[^>]*>[\s\S]*?<\/port>/g) ?? [])) {
+              const pm = pb.match(/portid="(\d+)"[^>]*protocol="([^"]+)"[^>]*>/);
+              const sm = pb.match(/<service[^>]*name="([^"]*)"[^>]*>/);
+              const stm = pb.match(/<state[^>]*state="([^"]+)"/);
+              if (!pm || stm?.[1] !== "open") continue;
+              const st = `${ip}:${pm[1]}`; const sid = await ensureAsset(st, "web"); if (!sid) return { error: "out_of_scope" };
+              await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: sid, title: `Open port ${pm[1]}/${pm[2] || "tcp"} (${sm?.[1] || "unknown"})`, accessType: "command", target: st, evidence: { port: pm[1], protocol: pm[2] || "tcp", service: sm?.[1] || "unknown", state: "open", source: "nmap" }, status: "open" } }); findingsCreated++;
+            }
+            const om = b.match(/<osmatch[^>]*name="([^"]+)"[^>]*>/);
+            if (om) { await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: aid, title: `OS detected: ${om[1]}`, accessType: "command", target: ip, evidence: { os: om[1], source: "nmap" }, status: "open" } }); findingsCreated++; }
+          }
+        } else if (format === "nuclei-jsonl") {
+          for (const line of content.split("\n").filter((l) => l.trim())) { let o: unknown; try { o = JSON.parse(line); } catch { continue; } const r = o as Record<string, unknown>; const t = (r.target || r.hostport || r.url || "") as string; if (!t) continue; const aid = await ensureAsset(t, "web"); if (!aid) return { error: "out_of_scope" }; await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: aid, title: (r.vulnerability || r["template-id"] || r.name || "unknown") as string, accessType: "command", target: t, evidence: { severity: r.severity || "info", ...r } as any, status: "open" } }); findingsCreated++; }
+        } else if (format === "httpx-json") {
+          for (const line of content.split("\n").filter((l) => l.trim())) { let o: unknown; try { o = JSON.parse(line); } catch { continue; } const r = o as Record<string, unknown>; const u = (r.url || "") as string; if (!u) continue; const aid = await ensureAsset(u, "web"); if (!aid) return { error: "out_of_scope" }; await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: aid, title: `HTTP ${r.status_code || r.status || 0} on ${u}`, accessType: "command", target: u, evidence: { statusCode: r.status_code || r.status || 0, title: r.title, ...r } as any, status: "open" } }); findingsCreated++; }
+        } else if (format === "ffuf-json") {
+          for (const line of content.split("\n").filter((l) => l.trim())) { let o: unknown; try { o = JSON.parse(line); } catch { continue; } const r = o as Record<string, unknown>; const u = (r.url || (r.input as Record<string, unknown> | undefined)?.FUZZ || "") as string; if (!u) continue; const aid = await ensureAsset(u, "web"); if (!aid) return { error: "out_of_scope" }; await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: aid, title: `FFUF ${r.word || ""} → ${u} (${r.status || 0})`, accessType: "command", target: u, evidence: { status: r.status, word: r.word, ...r } as any, status: "open" } }); findingsCreated++; }
+        }
+        emitScanEvent(sessionId, link.userId, "scan_progress", { taskId, progress: 100, currentStep: "ingest_complete", message: `📥 Ingested ${format}: ${assetsCreated} assets, ${findingsCreated} findings`, assetsCreated, findingsCreated, format });
+        return { ok: true, assetsCreated, findingsCreated };
+      },
+    },
+
+    {
+      name: "mss_ingest_bbot",
+      description: "Parse bbot JSONL → CompanyAsset + AgentFinding. scope_distance===0→asset; >0→third-party intel fact. Verifies ownership (C1) + in-scope (C2). Emits scan_progress. Returns { ok, assetsCreated, factsCreated, thirdPartyFacts }. No ARTEX calls.",
+      inputSchema: { type: "object", properties: { taskId: { type: "string" }, path: { type: "string" } }, required: ["taskId", "path"], additionalProperties: false },
+      execute: async (input: unknown) => {
+        const { taskId, path } = input as { taskId: string; path: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        let content: string; try { content = readFileSync(path, "utf-8"); } catch { return { error: `file_not_readable: ${path}` }; }
+        let assetsCreated = 0; let factsCreated = 0; let thirdPartyFacts = 0;
+        for (const line of content.split("\n").filter((l) => l.trim())) { let o: unknown; try { o = JSON.parse(line); } catch { continue; } const r = o as Record<string, unknown>; const t = (r.target || "") as string; const sd = (r.scope_distance as number | undefined) ?? 0; const it = (r.intel_type || "bbot_intel") as string; const ti = (r.title || it) as string; const ev = (r.evidence || r.data || {}) as Record<string, unknown>; if (!t) continue; if (sd === 0) { let a = await db.companyAsset.findFirst({ where: { target: t, companyId: company.id } }); if (!a) { const ty = t.match(/^https?:\/\//) ? "web" : "network"; a = await db.companyAsset.create({ data: { companyId: company.id, name: t, type: ty, target: t, inScope: true } }); assetsCreated++; } else if (!a.inScope) return { error: "out_of_scope" }; await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: a.id, title: ti, accessType: "command", target: t, evidence: { intelType: it, source: "bbot", ...ev } as any, status: "open" } }); factsCreated++; } else { await db.agentFinding.create({ data: { companyId: company.id, userId: link.userId, assetId: null, title: `[third-party] ${ti}`, accessType: "command", target: t, evidence: { intelType: it, scopeDistance: sd, source: "bbot", ...ev } as any, status: "open" } }); thirdPartyFacts++; } }
+        emitScanEvent(sessionId, link.userId, "scan_progress", { taskId, progress: 100, currentStep: "bbot_ingest_complete", message: `📥 Ingested bbot: ${assetsCreated} assets, ${factsCreated} facts, ${thirdPartyFacts} third-party`, assetsCreated, factsCreated, thirdPartyFacts });
+        return { ok: true, assetsCreated, factsCreated: factsCreated + thirdPartyFacts, thirdPartyFacts };
+      },
+    },
+
+    {
+      name: "mss_ffuf_scan",
+      description:
+        "Run ffuf against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs ffuf -of json -o <file> -rate 1 -t 1 -u <target>/FUZZ via runSafe(), saves JSON output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "ffuf", "json");
+        const result = runSafe("ffuf", ["-of", "json", "-o", outputFile, "-rate", "1", "-t", "1", "-u", `${target}/FUZZ`]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "ffuf_scan",
+          message: `🚀 ffuf scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_httpx_scan",
+      description:
+        "Run httpx against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs httpx -json -o <file> -rl 1 <target> via runSafe(), saves JSON output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "httpx", "json");
+        const result = runSafe("httpx", ["-json", "-o", outputFile, "-rl", "1", target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "httpx_scan",
+          message: `⚡ httpx scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_katana_scan",
+      description:
+        "Run katana against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs katana -o <file> <target> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "katana", "txt");
+        const result = runSafe("katana", ["-o", outputFile, target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "katana_scan",
+          message: `⚔️ katana scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_dalfox_scan",
+      description:
+        "Run dalfox against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs dalfox --rate-limit 1 <target> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "dalfox", "txt");
+        const result = runSafe("dalfox", ["--rate-limit", "1", target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "dalfox_scan",
+          message: `🦊 dalfox scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_sqlmap_scan",
+      description:
+        "Run sqlmap against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs sqlmap --delay 1 --batch <target> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "sqlmap", "txt");
+        const result = runSafe("sqlmap", ["--delay", "1", "--batch", target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "sqlmap_scan",
+          message: `💉 sqlmap scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_hydra_scan",
+      description:
+        "Run hydra against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs hydra ... <target> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "hydra", "txt");
+        const result = runSafe("hydra", [target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "hydra_scan",
+          message: `🔑 hydra scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_masscan_scan",
+      description:
+        "Run masscan against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs masscan ... <target> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "masscan", "txt");
+        const result = runSafe("masscan", [target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "masscan_scan",
+          message: `📊 masscan scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
+    {
+      name: "mss_bbot_scan",
+      description:
+        "Run bbot against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs bbot ... <target> via runSafe(), saves JSONL output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
+          target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+        },
+        required: ["taskId", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, target } = input as { taskId: string; target?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId: link.userId } });
+        if (!company) return { error: "company_not_found" };
+        if (!target) return { error: "target_required" };
+        const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
+        if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
+        const outputFile = scanOutputPath(taskId, "bbot", "jsonl");
+        const result = runSafe("bbot", [target]);
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId, progress: 50, currentStep: "bbot_scan",
+          message: `🕸️ bbot scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
+        });
+        return { ok: result.ok, outputFile, output: result.output };
+      },
+    },
+
     {
       name: "mss_insert_assets",
       description:
@@ -1179,6 +2031,886 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           }));
 
         return { nodes, edges };
+      },
+    },
+
+    {
+      name: "mss_record_fact",
+      description:
+        "Record a structured observation/fact for a scan task. Input: { taskId, summary, detail, source? }. Verifies ownership (C1), creates AgentFinding row (status open), emits scan_progress. Returns { id, status }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          summary: {
+            type: "string",
+            description: "Short fact summary",
+          },
+          detail: {
+            type: "string",
+            description: "Detailed fact description",
+          },
+          source: {
+            type: "string",
+            description: "Optional source of the fact",
+          },
+        },
+        required: ["taskId", "summary", "detail"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, summary, detail, source } = input as {
+          taskId: string;
+          summary?: string;
+          detail?: string;
+          source?: string;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const finding = await db.agentFinding.create({
+          data: {
+            companyId: company.id,
+            userId,
+            title: summary || "",
+            accessType: "command",
+            target: taskId,
+            evidence: { detail, source: source || "agent" },
+            status: "open",
+          },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "fact_recorded",
+          message: `📝 Fact recorded: ${summary}`,
+          factId: finding.id,
+        });
+
+        return { id: finding.id, status: finding.status };
+      },
+    },
+
+    {
+      name: "mss_save_task_credential",
+      description:
+        "Save encrypted test credentials for a scan task. Input: { taskId, username, password?, key?, port? }. Verifies ownership (C1), encrypts sensitive fields, stores in AgentScanLink.source. Returns { id, encrypted: true }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          username: {
+            type: "string",
+            description: "Credential username",
+          },
+          password: {
+            type: "string",
+            description: "Optional password",
+          },
+          key: {
+            type: "string",
+            description: "Optional SSH key or API key",
+          },
+          port: {
+            type: "number",
+            description: "Optional port number",
+          },
+        },
+        required: ["taskId", "username"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, username, password, key, port } = input as {
+          taskId: string;
+          username: string;
+          password?: string;
+          key?: string;
+          port?: number;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const id = randomUUID();
+        const credential = {
+          id,
+          username,
+          password: password ? encryptSecret(password) : undefined,
+          key: key ? encryptSecret(key) : undefined,
+          port,
+        };
+
+        const source = readLinkSource(link);
+        if (!Array.isArray(source.credentials)) source.credentials = [];
+        source.credentials.push(credential);
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "credential_saved",
+          message: `🔐 Credential saved for ${username}`,
+          credentialId: id,
+        });
+
+        return { id, encrypted: true };
+      },
+    },
+
+    {
+      name: "mss_list_task_credentials",
+      description:
+        "List saved credentials for a scan task (passwords/keys masked). Input: { taskId }. Verifies ownership (C1). Returns { credentials: [...] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        const credentials = (Array.isArray(source.credentials)
+          ? source.credentials
+          : []
+        ).map((c: any) => ({
+          id: c.id,
+          username: c.username,
+          password: c.password ? maskSecret(c.password) : undefined,
+          key: c.key ? maskSecret(c.key) : undefined,
+          port: c.port,
+        }));
+
+        return { credentials };
+      },
+    },
+
+    {
+      name: "mss_add_company_scope",
+      description:
+        "Add a company-level in-scope asset. Input: { target, type, inScope? }. Creates CompanyAsset row owned by the user's company. Returns { id }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target: {
+            type: "string",
+            description: "Domain, IP, or URL to add as an asset",
+          },
+          type: {
+            type: "string",
+            description: "Asset type: web | api | network | mobile",
+          },
+          inScope: {
+            type: "boolean",
+            description: "Whether the asset is in scope (default true)",
+          },
+        },
+        required: ["target", "type"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { target, type, inScope } = input as {
+          target: string;
+          type: string;
+          inScope?: boolean;
+        };
+
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const asset = await db.companyAsset.create({
+          data: {
+            companyId: company.id,
+            name: target,
+            type,
+            target,
+            inScope: inScope ?? true,
+          },
+        });
+
+        return { id: asset.id };
+      },
+    },
+
+    {
+      name: "mss_add_task_scope",
+      description:
+        "Add an in-scope asset to a scan task's scope. Input: { taskId, assetId }. Verifies ownership (C1), adds assetId to AgentScanLink.source scope array. Returns { ok: true }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          assetId: {
+            type: "string",
+            description: "CompanyAsset id to add to task scope",
+          },
+        },
+        required: ["taskId", "assetId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, assetId } = input as {
+          taskId: string;
+          assetId: string;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+        if (!Array.isArray(source.scope)) source.scope = [];
+        if (!source.scope.includes(assetId)) {
+          source.scope.push(assetId);
+        }
+
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "task_scope_updated",
+          message: `📐 Asset ${assetId} added to task scope`,
+          assetId,
+        });
+
+        return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_list_untested_assets",
+      description:
+        "List untested assets for a scan task. Input: { taskId, type?, limit? }. Verifies ownership (C1), queries CompanyAsset for assets not yet marked as tested in the coverage ledger. Returns { assets: [...] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id returned by mss_plan_scan",
+          },
+          type: {
+            type: "string",
+            description: "Optional asset type filter",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum results to return",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, type, limit } = input as {
+          taskId: string;
+          type?: string;
+          limit?: number;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const where: Record<string, unknown> = { companyId: company.id };
+        if (type) where.type = type;
+
+        const assets = await db.companyAsset.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          take: limit,
+        });
+
+        const source = readLinkSource(link);
+        const testedIds = new Set(
+          (Array.isArray(source.coverage)
+            ? source.coverage
+            : []
+          )
+            .filter((c: any) => c.type === "tested")
+            .map((c: any) => c.assetId)
+        );
+
+        const untested = assets
+          .filter((a) => !testedIds.has(a.id))
+          .map((a) => ({
+            id: a.id,
+            name: a.name,
+            type: a.type,
+            target: a.target,
+            inScope: a.inScope,
+          }));
+
+        return { assets: untested };
+      },
+    },
+
+    {
+      name: "mss_update_finding",
+      description:
+        "Edit an existing finding within a scan task. Input: { findingId, title?, severity?, evidence?, status?, humanNote?, stepId? }. Verifies ownership, updates allowed fields, emits scan_progress. Returns { ok, finding }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          findingId: {
+            type: "string",
+            description: "AgentFinding id to update",
+          },
+          title: {
+            type: "string",
+            description: "New finding title",
+          },
+          severity: {
+            type: "string",
+            description: "Finding severity (merged into evidence JSON)",
+          },
+          evidence: {
+            type: "string",
+            description: "New evidence text (merged into evidence JSON)",
+          },
+          status: {
+            type: "string",
+            description: "Finding status (open | reviewed | closed | active)",
+          },
+          humanNote: {
+            type: "string",
+            description: "Human reviewer note",
+          },
+          stepId: {
+            type: "string",
+            description: "Linked workflow step id",
+          },
+        },
+        required: ["findingId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { findingId, title, severity, evidence, status, humanNote, stepId } = input as {
+          findingId: string;
+          title?: string;
+          severity?: string;
+          evidence?: string;
+          status?: string;
+          humanNote?: string;
+          stepId?: string;
+        };
+
+        const finding = await db.agentFinding.findUnique({ where: { id: findingId } });
+        if (!finding) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify ownership — only the finding's user can update it
+        if (finding.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const updateData: Record<string, unknown> = {};
+        if (title !== undefined) updateData.title = title;
+        if (status !== undefined) updateData.status = status;
+        if (humanNote !== undefined) updateData.humanNote = humanNote;
+        if (stepId !== undefined) updateData.stepId = stepId;
+
+        // Merge severity/evidence into evidence JSON
+        if (severity !== undefined || evidence !== undefined) {
+          const existing: Record<string, unknown> =
+            typeof finding.evidence === "object" && finding.evidence !== null
+              ? (finding.evidence as Record<string, unknown>)
+              : {};
+          if (severity !== undefined) existing.severity = severity;
+          if (evidence !== undefined) existing.evidenceText = evidence;
+          updateData.evidence = existing as Prisma.InputJsonValue;
+        }
+
+        const updated = await db.agentFinding.update({
+          where: { id: findingId },
+          data: updateData,
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId: findingId,
+          currentStep: "finding_updated",
+          message: `📝 Finding updated: ${updated.title}`,
+          findingId: updated.id,
+        });
+
+        return {
+          ok: true,
+          finding: {
+            id: updated.id,
+            title: updated.title,
+            status: updated.status,
+            humanNote: updated.humanNote,
+            stepId: updated.stepId,
+            evidence: updated.evidence,
+          },
+        };
+      },
+    },
+
+    {
+      name: "mss_list_findings_by_group",
+      description:
+        "List findings for a CompanyAssetGroup. Input: { groupId }. Verifies group belongs to the user's company, returns findings joined via CompanyAsset → CompanyAssetGroup.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          groupId: {
+            type: "string",
+            description: "CompanyAssetGroup id",
+          },
+        },
+        required: ["groupId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { groupId } = input as { groupId: string };
+
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const group = await db.companyAssetGroup.findUnique({
+          where: { id: groupId },
+        });
+        if (!group) {
+          return { error: "scan_task_not_found" };
+        }
+        // C1: verify group belongs to the user's company
+        if (group.companyId !== company.id) {
+          return { error: "forbidden" };
+        }
+
+        const assets = await db.companyAsset.findMany({
+          where: { groupId },
+          select: { id: true },
+        });
+        const assetIds = assets.map((a) => a.id);
+
+        const findings = await db.agentFinding.findMany({
+          where: { assetId: { in: assetIds } },
+          orderBy: { createdAt: "desc" },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId: groupId,
+          currentStep: "findings_listed_by_group",
+          message: `📋 ${findings.length} findings in group ${group.name}`,
+          groupId,
+          findingsCount: findings.length,
+        });
+
+        return {
+          findings: findings.map((f) => ({
+            id: f.id,
+            title: f.title,
+            status: f.status,
+            humanNote: f.humanNote,
+            target: f.target,
+            assetId: f.assetId,
+            createdAt: f.createdAt,
+          })),
+          group: { id: group.id, name: group.name },
+        };
+      },
+    },
+
+    {
+      name: "mss_get_scan_results",
+      description:
+        "Aggregated scan results for a task (read-only, no DB writes, no events). Input: { taskId }. Verifies ownership, reads AgentScanLink.source + AgentFinding rows. Returns { taskId, goals, constraints, intents, hints, coverage, findings }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+
+        const findings = await db.agentFinding.findMany({
+          where: { target: taskId },
+          orderBy: { createdAt: "desc" },
+        });
+
+        return {
+          taskId,
+          goals: source.goals ?? [],
+          constraints: source.constraints ?? { allow: [], deny: [] },
+          intents: source.intents ?? [],
+          hints: source.hints ?? [],
+          coverage: source.coverage ?? [],
+          findings: findings.map((f) => ({
+            id: f.id,
+            title: f.title,
+            status: f.status,
+            humanNote: f.humanNote,
+            target: f.target,
+            assetId: f.assetId,
+            severity: (f.evidence as { severity?: string } | null)?.severity ?? "info",
+            createdAt: f.createdAt,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "mss_get_worker_output",
+      description:
+        "Retrieves saved worker output for a scan task. Input: { taskId }. Verifies ownership (C1). Returns { taskId, workerOutput }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+
+        return {
+          taskId,
+          workerOutput: source.workerOutput ?? "",
+        };
+      },
+    },
+
+    {
+      name: "mss_get_worker_trace",
+      description:
+        "Retrieves worker execution trace/debug info for a scan task. Input: { taskId }. Verifies ownership (C1). Returns { taskId, traces }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const source = readLinkSource(link);
+
+        return {
+          taskId,
+          traces: source.workerTraces ?? [],
+        };
+      },
+    },
+
+    {
+      name: "mss_search_worker_traces",
+      description:
+        "Keyword search across all stored worker traces for the authenticated user's company. Input: { keyword }. Returns { results: [{ taskId, stepId, output, timestamp }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          keyword: {
+            type: "string",
+            description: "Keyword to search for in worker traces",
+          },
+        },
+        required: ["keyword"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { keyword } = input as { keyword: string };
+
+        const links = await db.agentScanLink.findMany({
+          where: { userId },
+        });
+
+        const results: Array<{
+          taskId: string;
+          stepId: string;
+          output: string;
+          timestamp: string;
+        }> = [];
+
+        const kw = keyword.toLowerCase();
+        for (const link of links) {
+          const source = readLinkSource(link);
+          const traces = source.workerTraces ?? [];
+          for (const trace of traces) {
+            if (
+              trace.output.toLowerCase().includes(kw) ||
+              trace.stepId.toLowerCase().includes(kw)
+            ) {
+              results.push({
+                taskId: link.taskId,
+                stepId: trace.stepId,
+                output: trace.output,
+                timestamp: trace.timestamp,
+              });
+            }
+          }
+        }
+
+        return { results };
+      },
+    },
+
+    {
+      name: "mss_node_detail",
+      description:
+        "Get detail for a specific finding or asset node. Input: { nodeId }. Looks up AgentFinding by id first, then CompanyAsset. Verifies ownership. Returns { type, data }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          nodeId: {
+            type: "string",
+            description: "Finding id or asset id",
+          },
+        },
+        required: ["nodeId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { nodeId } = input as { nodeId: string };
+
+        // Try finding first
+        const finding = await db.agentFinding.findUnique({ where: { id: nodeId } });
+        if (finding) {
+          if (finding.userId !== userId) {
+            return { error: "forbidden" };
+          }
+          return {
+            type: "finding",
+            data: {
+              id: finding.id,
+              title: finding.title,
+              status: finding.status,
+              humanNote: finding.humanNote,
+              target: finding.target,
+              assetId: finding.assetId,
+              accessType: finding.accessType,
+              severity: (finding.evidence as { severity?: string } | null)?.severity ?? "info",
+              evidence: finding.evidence,
+              createdAt: finding.createdAt,
+            },
+          };
+        }
+
+        // Try asset
+        const asset = await db.companyAsset.findUnique({ where: { id: nodeId } });
+        if (asset) {
+          const company = await db.company.findUnique({ where: { userId } });
+          if (!company || asset.companyId !== company.id) {
+            return { error: "forbidden" };
+          }
+          return {
+            type: "asset",
+            data: {
+              id: asset.id,
+              name: asset.name,
+              type: asset.type,
+              target: asset.target,
+              inScope: asset.inScope,
+              groupId: asset.groupId,
+              createdAt: asset.createdAt,
+            },
+          };
+        }
+
+        return { error: "scan_task_not_found" };
+      },
+    },
+
+    {
+      name: "mss_list_facts",
+      description:
+        "List recorded facts for a scan task. Input: { taskId }. Verifies ownership (C1), returns AgentFinding rows recorded via mss_record_fact. Returns { facts: [...] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id",
+          },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const facts = await db.agentFinding.findMany({
+          where: { target: taskId },
+          orderBy: { createdAt: "desc" },
+        });
+
+        return {
+          facts: facts.map((f) => ({
+            id: f.id,
+            summary: f.title,
+            detail: (f.evidence as { detail?: string } | null)?.detail ?? "",
+            source: (f.evidence as { source?: string } | null)?.source,
+            status: f.status,
+            createdAt: f.createdAt,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "mss_list_companies",
+      description:
+        "List all companies (admin). Input: {}. Non-admin users see only their own company. Returns { companies: [...] }.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const user = await db.user.findUnique({ where: { id: userId } });
+        const isAdmin = user?.role === "admin";
+
+        let companies;
+        if (isAdmin) {
+          companies = await db.company.findMany({
+            orderBy: { createdAt: "desc" },
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              status: true,
+              userId: true,
+              createdAt: true,
+            },
+          });
+        } else {
+          const company = await db.company.findUnique({
+            where: { userId },
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              status: true,
+              userId: true,
+              createdAt: true,
+            },
+          });
+          companies = company ? [company] : [];
+        }
+
+        return {
+          companies: companies.map((c) => ({
+            id: c.id,
+            name: c.name,
+            domain: c.domain,
+            status: c.status,
+            userId: c.userId,
+            createdAt: c.createdAt,
+          })),
+        };
       },
     },
     {
