@@ -48,44 +48,52 @@ export async function POST(req: Request) {
     let result;
     try {
       if (sessionId) {
+        // sendClineMessage cold-resumes internally (Phase 0 R1) when ClineCore
+        // lost the session — do NOT fall back to startClineSession here (that
+        // was amnesia: new prompt only, no history, and R2 double-persist risk).
         result = await sendClineMessage({
-      sessionId,
-      userId: session.userId,
-      prompt: message,
-      userImages,
-      userFiles,
-    });
-    // If the Cline runtime no longer holds this session (e.g. server restart),
-    // resume it as a fresh run so session switching still works.
-    if (result.status === "failed") {
-      result = await startClineSession({
-        userId: session.userId,
-        prompt: message,
-        sessionId,
-        modelId,
-        userImages,
-        userFiles,
-      });
+          sessionId,
+          userId: session.userId,
+          prompt: message,
+          userImages,
+          userFiles,
+        });
+        // Only recreate when the session row itself is unknown (deleted / never
+        // started) — not for generic send failures.
+        if (
+          result.status === "failed" &&
+          typeof result.error === "string" &&
+          /session_not_found|session not found|unusable session/i.test(result.error)
+        ) {
+          result = await startClineSession({
+            userId: session.userId,
+            prompt: message,
+            sessionId,
+            modelId,
+            userImages,
+            userFiles,
+            resume: true,
+          });
+        }
+      } else {
+        result = await startClineSession({
+          userId: session.userId,
+          prompt: message,
+          modelId,
+          userImages,
+          userFiles,
+        });
+      }
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error: err instanceof Error ? err.message : "Cline session failed",
+          sessionId: null,
+          clineReady: false,
+        },
+        { status: 500 },
+      );
     }
-  } else {
-    result = await startClineSession({
-      userId: session.userId,
-      prompt: message,
-      modelId,
-      userImages,
-      userFiles,
-    });
-  }
-  } catch (err) {
-    return NextResponse.json(
-      {
-        error: err instanceof Error ? err.message : "Cline session failed",
-        sessionId: null,
-        clineReady: false,
-      },
-      { status: 500 },
-    );
-  }
 
   if (result.status === "failed") {
     const isAuthFailure =
@@ -153,6 +161,8 @@ export async function POST(req: Request) {
       let result;
       try {
         if (sessionId) {
+          // Same as non-SSE: send cold-resumes internally on lost ClineCore
+          // session (R1); no blanket start fallback (amnesia + R2).
           result = await sendClineMessage(
             {
               sessionId,
@@ -163,7 +173,11 @@ export async function POST(req: Request) {
             },
             (event) => enqueue(event.type, event.data),
           );
-          if (result.status === "failed") {
+          if (
+            result.status === "failed" &&
+            typeof result.error === "string" &&
+            /session_not_found|session not found|unusable session/i.test(result.error)
+          ) {
             result = await startClineSession(
               {
                 userId: session.userId,
@@ -172,6 +186,7 @@ export async function POST(req: Request) {
                 modelId,
                 userImages,
                 userFiles,
+                resume: true,
               },
               (event) => enqueue(event.type, event.data),
             );

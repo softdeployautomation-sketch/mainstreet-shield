@@ -54,15 +54,30 @@ const ARTEX_MCP_URL = process.env.ARTEX_MCP_URL ?? "http://127.0.0.1:8787/mcp";
 // Pooled MCP session id (Streamable HTTP `Mcp-Session-Id`), reused across calls.
 let _mcpSessionId: string | null = null;
 
-// Set for the duration of a Cline turn so MCP scan tools can emit live scan
-// SSE events through the chat stream. Cleared when the turn ends.
-let _turnOnEvent: OnClineEvent | null = null;
+// Phase 0 R5: per-session turn handlers (not a process-global) so concurrent
+// chat sessions never cross-wire scan SSE events. Cleared when that turn ends.
+const _turnHandlers = new Map<string, OnClineEvent>();
+
+function setTurnHandler(sessionId: string, handler: OnClineEvent | null): void {
+  if (handler) _turnHandlers.set(sessionId, handler);
+  else _turnHandlers.delete(sessionId);
+}
 
 function emitScanEvent(
+  sessionId: string,
   type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed",
   data: unknown,
 ): void {
-  _turnOnEvent?.({ type, data } as ClineStreamEvent);
+  _turnHandlers.get(sessionId)?.({ type, data } as ClineStreamEvent);
+}
+
+/** Session-missing / unusable errors from ClineCore (cold resume signal). */
+function isSessionMissingError(err: unknown): boolean {
+  if (!err) return false;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "session_not_found") return true;
+  const msg = e.message ?? String(err);
+  return /session_not_found|session not found|unusable session|session_run_in_progress/i.test(msg);
 }
 
 function mcpHeaders(accept = "application/json, text/event-stream"): HeadersInit {
@@ -324,6 +339,16 @@ export interface ClineStreamEvent {
 
 type OnClineEvent = (event: ClineStreamEvent) => void;
 
+/** Phase 0 R4: scan chips persisted with each assistant turn. */
+export interface ScanEvent {
+  type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed";
+  message: string;
+  taskId?: string;
+  progress?: number | string;
+  currentStep?: string;
+  findings?: unknown[];
+}
+
 function translateCoreEvent(event: CoreSessionEvent): ClineStreamEvent | null {
   // --- agent_event: structured content / tool boundaries -------------------
   if (event.type === "agent_event") {
@@ -410,6 +435,12 @@ export interface StartClineSessionInput {
   modelId?: string;
   userImages?: string[];
   userFiles?: string[];
+  /**
+   * Phase 0 R1: cold resume — rebuild ClineCore from DB transcript via
+   * `initialMessages` so the model still sees prior turns after restart.
+   * When true, history already in DB is NOT re-persisted (only the new turn).
+   */
+  resume?: boolean;
 }
 
 export interface StartClineSessionResult {
@@ -470,7 +501,7 @@ Rules:
 
 If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").`;
 
-export function mssTools(userId: string): AgentTool[] {
+export function mssTools(userId: string, sessionId: string): AgentTool[] {
   return [
     {
       name: "list_assets",
@@ -879,7 +910,7 @@ export function mssTools(userId: string): AgentTool[] {
           },
         });
         if (!asset) {
-          emitScanEvent("scan_failed", {
+          emitScanEvent(sessionId, "scan_failed", {
             target,
             scanType,
             message: `Target not in scope or not owned by your company: ${target}`,
@@ -896,7 +927,7 @@ export function mssTools(userId: string): AgentTool[] {
             goal,
           });
           const taskId: string = result.taskId;
-          emitScanEvent("scan_started", {
+          emitScanEvent(sessionId, "scan_started", {
             target,
             scanType,
             taskId,
@@ -904,7 +935,7 @@ export function mssTools(userId: string): AgentTool[] {
           });
           return { taskId };
         } catch (err) {
-          emitScanEvent("scan_failed", {
+          emitScanEvent(sessionId, "scan_failed", {
             target,
             scanType,
             error: err instanceof Error ? err.message : String(err),
@@ -936,7 +967,7 @@ export function mssTools(userId: string): AgentTool[] {
           const result: any = await artexMCPCall("artex_scan_status", { taskId });
           const progress = result.progress ?? 0;
           if (result.status === "running" || result.status === "pending") {
-            emitScanEvent("scan_progress", {
+            emitScanEvent(sessionId, "scan_progress", {
               taskId,
               progress,
               currentStep: result.currentStep ?? result.status,
@@ -949,7 +980,7 @@ export function mssTools(userId: string): AgentTool[] {
             progress,
           };
         } catch (err) {
-          emitScanEvent("scan_failed", {
+          emitScanEvent(sessionId, "scan_failed", {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -979,7 +1010,7 @@ export function mssTools(userId: string): AgentTool[] {
         try {
           const result: any = await artexMCPCall("artex_scan_results", { taskId });
           const findings = Array.isArray(result.findings) ? result.findings : [];
-          emitScanEvent("scan_completed", {
+          emitScanEvent(sessionId, "scan_completed", {
             taskId,
             findings,
             message: `✅ Scan completed — ${findings.length} findings`,
@@ -994,7 +1025,7 @@ export function mssTools(userId: string): AgentTool[] {
             })),
           };
         } catch (err) {
-          emitScanEvent("scan_failed", {
+          emitScanEvent(sessionId, "scan_failed", {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -1025,7 +1056,7 @@ export function mssTools(userId: string): AgentTool[] {
           await artexMCPCall("artex_scan_stop", { taskId });
           return { taskId, stopped: true };
         } catch (err) {
-          emitScanEvent("scan_failed", {
+          emitScanEvent(sessionId, "scan_failed", {
             taskId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -1506,6 +1537,8 @@ export function mssTools(userId: string): AgentTool[] {
 // ---------------------------------------------------------------------------
 // B-3: persist a full turn (user + assistant) so sessions survive ClineCore
 // recreation across serverless invocations.
+// Phase 0 R4: also store scanEvents on the assistant row so chips survive reload.
+// Phase 0 R2: callers persist only the NEW turn — never re-write prior history.
 // ---------------------------------------------------------------------------
 export async function persistClineTurn(input: {
   sessionId: string;
@@ -1514,6 +1547,7 @@ export async function persistClineTurn(input: {
   assistantResponse: string;
   thinking: string[];
   tools: ToolCall[];
+  scanEvents?: ScanEvent[];
 }): Promise<void> {
   await db.$transaction([
     db.clineAgentMessage.create({
@@ -1533,6 +1567,7 @@ export async function persistClineTurn(input: {
           text: input.assistantResponse,
           thinking: input.thinking,
           tools: input.tools,
+          scanEvents: input.scanEvents ?? [],
         } as any,
       },
     }),
@@ -1569,11 +1604,36 @@ export async function startClineSession(
   let sseResponse = "";
   let sseThinking: string[] = [];
   let sseTools: ToolCall[] = [];
+  const sseScanEvents: ScanEvent[] = [];
+
+  // Phase 0 R1: cold resume — seed the model with DB transcript so it is not
+  // amnesiac after ClineCore restart. History rows stay as-is (R2: no re-persist).
+  let initialMessages: MessageWithMetadata[] | undefined;
+  if (input.resume) {
+    try {
+      const history = await readClineMessages(sessionId);
+      if (history.length > 0) initialMessages = history;
+    } catch {
+      initialMessages = undefined;
+    }
+  }
+
+  const turnHandler: OnClineEvent = (ev) => {
+    if (
+      ev.type === "scan_started" ||
+      ev.type === "scan_progress" ||
+      ev.type === "scan_completed" ||
+      ev.type === "scan_failed"
+    ) {
+      sseScanEvents.push(ev.data as ScanEvent);
+    }
+    onEvent?.(ev);
+  };
 
   const unsubscribe = core.subscribe((event: CoreSessionEvent) => {
     const streamEvent = translateCoreEvent(event);
     if (streamEvent) {
-      onEvent?.(streamEvent);
+      turnHandler(streamEvent);
       // Accumulate for persistence fallback
       if (streamEvent.type === "content" && typeof streamEvent.data === "string") {
         sseResponse += streamEvent.data;
@@ -1587,7 +1647,7 @@ export async function startClineSession(
   _sessionUnsub.set(sessionId, unsubscribe);
 
   let resultText = "";
-  _turnOnEvent = onEvent ?? null;
+  setTurnHandler(sessionId, turnHandler);
   try {
     const startResult = await core.start({
       config: {
@@ -1600,11 +1660,12 @@ export async function startClineSession(
         cwd,
         workspaceRoot: cwd,
         enableTools: true,
-        extraTools: mssTools(input.userId),
+        extraTools: mssTools(input.userId, sessionId),
         enableSpawnAgent: false,
         enableAgentTeams: false,
       },
       prompt: input.prompt,
+      ...(initialMessages && initialMessages.length > 0 ? { initialMessages } : {}),
       userImages: input.userImages,
       userFiles: input.userFiles,
       interactive: true,
@@ -1633,7 +1694,7 @@ export async function startClineSession(
       clineReady: true,
     };
   } finally {
-    _turnOnEvent = null;
+    setTurnHandler(sessionId, null);
   }
 
   const messages = await core.readMessages(sessionId).catch(() => [] as MessageWithMetadata[]);
@@ -1643,8 +1704,8 @@ export async function startClineSession(
   // Use SSE-accumulated thinking if ClineCore returned none
   const finalThinking = thinking.length > 0 ? thinking : sseThinking;
 
-  // B-3: persist the turn so the transcript survives ClineCore recreation.
-  // Don't swallow errors — if DB write fails, surface it.
+  // B-3: persist only THIS turn (new user prompt + assistant). Prior history
+  // already lives in DB on resume — R2: never rewrite it.
   await persistClineTurn({
     sessionId,
     userId: input.userId,
@@ -1652,6 +1713,7 @@ export async function startClineSession(
     assistantResponse,
     thinking: finalThinking,
     tools: sseTools,
+    scanEvents: sseScanEvents,
   });
 
   return {
@@ -1699,12 +1761,25 @@ export async function sendClineMessage(
   let sseResponse = "";
   let sseThinking: string[] = [];
   let sseTools: ToolCall[] = [];
+  const sseScanEvents: ScanEvent[] = [];
+
+  const turnHandler: OnClineEvent = (ev) => {
+    if (
+      ev.type === "scan_started" ||
+      ev.type === "scan_progress" ||
+      ev.type === "scan_completed" ||
+      ev.type === "scan_failed"
+    ) {
+      sseScanEvents.push(ev.data as ScanEvent);
+    }
+    onEvent?.(ev);
+  };
 
   const core = await getCline();
   const unsubscribe = core.subscribe((event: CoreSessionEvent) => {
     const streamEvent = translateCoreEvent(event);
     if (streamEvent) {
-      onEvent?.(streamEvent);
+      turnHandler(streamEvent);
       // Accumulate for persistence fallback
       if (streamEvent.type === "content" && typeof streamEvent.data === "string") {
         sseResponse += streamEvent.data;
@@ -1716,7 +1791,7 @@ export async function sendClineMessage(
     }
   });
   _sessionUnsub.set(input.sessionId, unsubscribe);
-  _turnOnEvent = onEvent ?? null;
+  setTurnHandler(input.sessionId, turnHandler);
   try {
     await core.send({
       sessionId: input.sessionId,
@@ -1737,6 +1812,42 @@ export async function sendClineMessage(
         clineReady: false,
       };
     }
+    // Phase 0 R1: cold resume — ClineCore lost the session (restart / not
+    // resident). Rebuild with DB transcript as initialMessages, then run this
+    // turn. Chat route must NOT call start again (that was amnesia + R2
+    // double-persist risk); we return the completed result here.
+    if (isSessionMissingError(err)) {
+      try {
+        const resumed = await startClineSession(
+          {
+            userId: input.userId,
+            sessionId: input.sessionId,
+            prompt: input.prompt,
+            userImages: input.userImages,
+            userFiles: input.userFiles,
+            resume: true,
+          },
+          onEvent,
+        );
+        return {
+          sessionId: resumed.sessionId || input.sessionId,
+          response: resumed.response,
+          thinking: resumed.thinking,
+          status: resumed.status,
+          error: resumed.error,
+          clineReady: resumed.clineReady,
+        };
+      } catch (resumeErr) {
+        return {
+          sessionId: input.sessionId,
+          response: "",
+          thinking: [],
+          status: "failed",
+          error: resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
+          clineReady: true,
+        };
+      }
+    }
     return {
       sessionId: input.sessionId,
       response: "",
@@ -1745,7 +1856,7 @@ export async function sendClineMessage(
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
-    _turnOnEvent = null;
+    setTurnHandler(input.sessionId, null);
   }
 
   const messages = await core.readMessages(input.sessionId).catch(() => [] as MessageWithMetadata[]);
@@ -1755,8 +1866,7 @@ export async function sendClineMessage(
   // Use SSE-accumulated thinking if ClineCore returned none
   const finalThinking = thinking.length > 0 ? thinking : sseThinking;
 
-  // B-3: persist the turn so the transcript survives ClineCore recreation.
-  // Don't swallow errors — if DB write fails, surface it.
+  // B-3: persist only this turn. Don't swallow errors — if DB write fails, surface it.
   await persistClineTurn({
     sessionId: input.sessionId,
     userId: input.userId,
@@ -1764,6 +1874,7 @@ export async function sendClineMessage(
     assistantResponse,
     thinking: finalThinking,
     tools: sseTools,
+    scanEvents: sseScanEvents,
   });
 
   return {
@@ -1828,6 +1939,8 @@ export interface ClineUiMessage {
   content: string;
   thinking: string[];
   tools: ToolCall[];
+  /** Phase 0 R4: persisted scan chips for this assistant turn. */
+  scanEvents?: ScanEvent[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -1863,12 +1976,23 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
   const texts: string[] = [];
   const thinking: string[] = [];
   const tools: ToolCall[] = [];
+  let scanEvents: ScanEvent[] | undefined;
   const parts: unknown[] =
     typeof inner.content === "string"
       ? [{ type: "text", text: inner.content }]
       : Array.isArray(inner.content)
         ? inner.content
         : [];
+
+  // Phase 0 R4: scanEvents live on the persisted content object (DB rows) or
+  // as a sibling field depending on how the message was stored.
+  const contentRecord = asRecord(inner.content);
+  const scanFromContent = Array.isArray(contentRecord?.scanEvents)
+    ? (contentRecord.scanEvents as ScanEvent[])
+    : Array.isArray(inner.scanEvents)
+      ? (inner.scanEvents as ScanEvent[])
+      : null;
+  if (scanFromContent && scanFromContent.length > 0) scanEvents = scanFromContent;
 
   for (const rawPart of parts) {
     const part = asRecord(rawPart);
@@ -1896,9 +2020,25 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
     }
   }
 
+  // Phase 0 R3: tools may also sit on the content object (DB-persisted turn)
+  // rather than as content blocks.
+  if (tools.length === 0 && Array.isArray(contentRecord?.tools)) {
+    for (const rawTool of contentRecord.tools) {
+      const t = asRecord(rawTool);
+      if (t && typeof t.toolName === "string") {
+        tools.push({
+          toolName: t.toolName,
+          input: t.input,
+          output: t.output,
+          isError: t.isError === true,
+        });
+      }
+    }
+  }
+
   // Fix 4: don't filter out empty-content messages — return them with empty
   // content so user messages aren't lost from transcripts.
-  if (texts.length === 0 && thinking.length === 0 && tools.length === 0) {
+  if (texts.length === 0 && thinking.length === 0 && tools.length === 0 && !scanEvents?.length) {
     return {
       id: typeof m.id === "string" ? m.id : randomUUID(),
       role,
@@ -1914,6 +2054,7 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
     content: texts.join("\n\n"),
     thinking,
     tools,
+    ...(scanEvents && scanEvents.length > 0 ? { scanEvents } : {}),
   };
 }
 
@@ -1930,22 +2071,48 @@ export function normalizeClineMessagesForUi(
 
 // B-3: map a stored transcript row back to a Cline MessageWithMetadata so the
 // UI can render it identically to a live Cline read.
+// Phase 0 R3/R4: carry tools + scanEvents from persisted content into blocks.
 function clineAgentMessageToMessage(row: {
   id: string;
   role: string;
   content: unknown;
   createdAt: Date;
 }): MessageWithMetadata {
-  const c = row.content as { text?: string; thinking?: string[] } | null;
+  const c = row.content as {
+    text?: string;
+    thinking?: string[];
+    tools?: ToolCall[];
+    scanEvents?: ScanEvent[];
+  } | null;
   // Handle both object content { text, thinking } and plain string content.
   const text = typeof row.content === "string" ? row.content : c?.text ?? "";
   const thinking = c?.thinking ?? [];
+  const tools = Array.isArray(c?.tools) ? c.tools : [];
+  const scanEvents = Array.isArray(c?.scanEvents) ? c.scanEvents : [];
   const blocks: ContentBlock[] = [{ type: "text", text }];
   for (const t of thinking) blocks.push({ type: "thinking", thinking: t });
+  for (const tool of tools) {
+    blocks.push({
+      type: "tool-call",
+      toolName: tool.toolName,
+      input: tool.input,
+    } as unknown as ContentBlock);
+    if (tool.output !== undefined) {
+      blocks.push({
+        type: "tool-result",
+        toolName: tool.toolName,
+        output: tool.output,
+        isError: tool.isError === true,
+      } as unknown as ContentBlock);
+    }
+  }
   return {
     id: row.id,
     role: row.role as "user" | "assistant",
     content: blocks,
+    // Sibling fields the normalizer also reads (content object path).
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(scanEvents.length > 0 ? { scanEvents } : {}),
     createdAt: row.createdAt,
   } as MessageWithMetadata;
 }

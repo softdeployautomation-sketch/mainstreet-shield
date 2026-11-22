@@ -123,6 +123,8 @@ export function AgentChat() {
                     role: m.role,
                     content: typeof m.content === "string" ? m.content : "",
                     thinking: m.thinking,
+                    tools: Array.isArray(m.tools) ? m.tools : undefined,
+                    scanEvents: Array.isArray(m.scanEvents) ? m.scanEvents : undefined,
                   } as Message),
               );
               setMessages(msgs);
@@ -183,6 +185,8 @@ export function AgentChat() {
               role: m.role,
               content: typeof m.content === "string" ? m.content : "",
               thinking: m.thinking,
+              tools: Array.isArray(m.tools) ? m.tools : undefined,
+              scanEvents: Array.isArray(m.scanEvents) ? m.scanEvents : undefined,
             } as Message),
         );
         setMessages(msgs);
