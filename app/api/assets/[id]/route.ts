@@ -11,6 +11,7 @@ const updateAssetSchema = z.object({
   target: z.string().min(1).optional(),
   inScope: z.boolean().optional(),
   groupId: z.string().nullable().optional(),
+  details: z.string().optional(),
 });
 
 // POST /api/assets/[id] — handles DELETE via _method=DELETE (form compatibility)
@@ -96,6 +97,7 @@ export async function PATCH(
         ...(data.target !== undefined && { target: data.target }),
         ...(data.inScope !== undefined && { inScope: data.inScope }),
         ...(data.groupId !== undefined && { groupId: data.groupId }),
+        ...(data.details !== undefined && { details: data.details }),
       },
       include: { group: true },
     });

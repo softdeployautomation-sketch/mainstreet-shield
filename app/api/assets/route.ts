@@ -9,6 +9,7 @@ const assetSchema = z.object({
   name: z.string().optional(),
   inScope: z.boolean().optional(),
   groupId: z.string().optional(),
+  details: z.string().optional(),
 });
 
 // GET /api/assets — list assets for the user's company
@@ -88,6 +89,9 @@ export async function POST(req: Request) {
     };
     if (data.groupId !== undefined) {
       createData.groupId = data.groupId;
+    }
+    if (data.details !== undefined) {
+      createData.details = data.details;
     }
     const asset = await db.companyAsset.create({
       data: createData,

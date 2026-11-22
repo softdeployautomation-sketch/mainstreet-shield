@@ -109,6 +109,7 @@ model CompanyAsset {
   type        String   @default("web") // web | api | network | mobile
   target      String   // domain, IP, URL
   inScope     Boolean  @default(true)
+  details     String?  // T-3.3: free-text details (notes, credentials hints, misconfigurations)
   notes       String?
   groupId     String?   // B-6: optional asset group/folder
   createdAt   DateTime @default(now())
@@ -125,12 +126,32 @@ model CompanyAssetGroup {
   id        String   @id @default(cuid())
   companyId String
   name      String
+  reportDocumentId String?  // T-3.2: linked ReportDocument for scan history
   createdAt DateTime @default(now())
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   assets  CompanyAsset[]
+  reportDocuments ReportDocument[]
 
   @@index([companyId])
+}
+
+
+// ---------------------------------------------------------------------------
+// ReportDocument — scan history + findings per asset group (T-3.2)
+// ---------------------------------------------------------------------------
+model ReportDocument {
+  id          String   @id @default(cuid())
+  groupId     String
+  title       String   // e.g. "Scan results for web group - 2026-11-21"
+  content     String   // markdown: scan process, findings, timestamps, decisions
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  group CompanyAssetGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
 }
 
 // ---------------------------------------------------------------------------

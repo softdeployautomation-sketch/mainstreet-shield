@@ -602,7 +602,30 @@ export function AgentChat() {
                 </summary>
                 <div className="rounded border border-border bg-bg-elevated/50 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto space-y-1">
                   {msg.tools.map((tool, i) => {
-                    const icon = tool.isError ? "✗" : tool.output !== undefined ? "✓" : "🔧";
+                    // T-3.5: render artex_scan_full_lifecycle events as individual scan chips
+                    if (tool.toolName === "artex_scan_full_lifecycle" && tool.output && typeof tool.output === "object" && Array.isArray((tool.output as any).events)) {
+                      const events = (tool.output as any).events;
+                      return (
+                        <div key={i} className="break-words whitespace-pre-wrap mb-0.5">
+                          <span className="text-brand-500">🔧 {tool.toolName}</span>
+                          {events.map((ev: any, j: number) => {
+                            const evIcon = ev.type === "scan_started" ? "🔍" : ev.type === "scan_progress" ? "⏳" : ev.type === "scan_completed" ? "✅" : "❌";
+                            const evColor = ev.type === "scan_failed" ? "text-rose-400" : ev.type === "scan_completed" ? "text-emerald-400" : "text-zinc-400";
+                            return (
+                              <div key={j} className="ml-2 break-words whitespace-pre-wrap mb-0.5">
+                                <span className={evColor}>{evIcon} {ev.message}</span>
+                              </div>
+                            );
+                          })}
+                          {(() => { const out = tool.output as any; return out.findings && (
+                            <div className="ml-2 break-words whitespace-pre-wrap mb-0.5 text-zinc-300">
+                              📊 {out.findings.length} findings · new assets: {out.newAssets?.length ?? 0} · report: {out.reportDocumentId ?? "none"}
+                            </div>
+                          ); })()}
+                        </div>
+                      );
+                    }
+                    const icon =tool.isError ? "✗" : tool.output!== undefined ? "✓" : "🔧";
                     const color = tool.isError ? "text-rose-400" : tool.output !== undefined ? "text-emerald-400" : "text-zinc-400";
                     return (
                       <div key={i} className="break-words whitespace-pre-wrap mb-0.5">

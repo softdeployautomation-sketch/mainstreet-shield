@@ -302,6 +302,15 @@ Asset write tools (MainStreet company DB):
 - update_asset — Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Use when the user wants to change an asset's name, scope, type, target, or group.
 - add_asset_to_group — Assign an existing asset to a group. Input: { id, groupId }. Use when the user wants to organize an asset under a group.
 
+ARTEX decision tools:
+- decide_scan_target — Analyze existing in-scope assets and recommend a scan target + scanType. Input: {}. Use before starting a scan to pick the best target based on what assets exist.
+- artex_scan_full_lifecycle — Run a complete ARTEX scan: verify target in-scope, start scan, poll status (every 5s, max 120s), retrieve findings, auto-create assets from findings, and write a report document. Input: { target, scanType }.
+
+Report document tools:
+- list_report_documents — List report documents for the user's company. Optional input: { groupId? }.
+- create_report_document — Create a new report document linked to an asset group. Input: { groupId, title, content? }.
+- update_report_document — Update an existing report document (append content). Input: { id, title?, content? }.
+
 Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
@@ -687,7 +696,7 @@ export function mssTools(userId: string): AgentTool[] {
     {
       name: "create_asset",
       description:
-        "Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. 'add example.com as an asset').",
+        "Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId?, details? }. Use when the user wants to add a new asset (e.g. 'add example.com as an asset' or 'add 164.68.105.96 as an asset'). Target can be a hostname, IP address, URL, or any identifier — no URL validation is applied. details is free-text for notes, credentials hints, misconfigurations observed.",
       inputSchema: {
         type: "object",
         properties: {
@@ -696,17 +705,19 @@ export function mssTools(userId: string): AgentTool[] {
           target: { type: "string", description: "Host, IP, URL, or target identifier" },
           inScope: { type: "boolean", description: "Whether the asset is in scope (default true)" },
           groupId: { type: "string", description: "Optional group id to assign the asset to" },
+          details: { type: "string", description: "Free-text details: notes, credentials hints, misconfigurations" },
         },
         required: ["name", "type", "target"],
         additionalProperties: false,
       },
       execute: async (input: unknown) => {
-        const { name, type, target, inScope, groupId } = input as {
+        const { name, type, target, inScope, groupId, details } = input as {
           name: string;
           type: string;
           target: string;
           inScope?: boolean;
           groupId?: string;
+          details?: string;
         };
 
         const company = await db.company.findUnique({
@@ -724,6 +735,7 @@ export function mssTools(userId: string): AgentTool[] {
             target,
             inScope: inScope ?? true,
             ...(groupId !== undefined && { groupId: groupId as any }),
+            ...(details !== undefined && { details }),
           },
           include: { group: true },
         });
@@ -734,7 +746,7 @@ export function mssTools(userId: string): AgentTool[] {
     {
       name: "update_asset",
       description:
-        "Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Ownership is verified by the API route. Use when the user wants to change an asset's name, scope, type, target, or group.",
+        "Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId?, details? }. Ownership is verified. Use when the user wants to change an asset's name, scope, type, target, group, or details.",
       inputSchema: {
         type: "object",
         properties: {
@@ -744,6 +756,7 @@ export function mssTools(userId: string): AgentTool[] {
           target: { type: "string", description: "New host, IP, URL, or target" },
           inScope: { type: "boolean", description: "Whether the asset is in scope" },
           groupId: { type: "string", description: "Group id to assign (or null to unassign)" },
+          details: { type: "string", description: "Free-text details: notes, credentials hints, misconfigurations" },
         },
         required: ["id"],
         additionalProperties: false,
@@ -756,6 +769,7 @@ export function mssTools(userId: string): AgentTool[] {
           target?: string;
           inScope?: boolean;
           groupId?: string | null;
+          details?: string;
         };
 
         const company = await db.company.findUnique({
@@ -778,6 +792,7 @@ export function mssTools(userId: string): AgentTool[] {
             ...(fields.target !== undefined && { target: fields.target }),
             ...(fields.inScope !== undefined && { inScope: fields.inScope }),
             ...(fields.groupId !== undefined && { groupId: fields.groupId }),
+            ...(fields.details !== undefined && { details: fields.details }),
           },
           include: { group: true },
         });
@@ -819,6 +834,302 @@ export function mssTools(userId: string): AgentTool[] {
           include: { group: true },
         });
         return { ok: true, asset: updated };
+      },
+    },
+
+    {
+      name: "decide_scan_target",
+      description:
+        "Analyze existing in-scope assets and recommend a scan target + scanType. Input: {}. Returns { recommendedTarget, recommendedScanType, recommendedGoal, reasoning, availableAssets }. Use before starting a scan to pick the best target.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const company = await db.company.findUnique({
+          where: { userId },
+          include: {
+            assets: { where: { inScope: true }, orderBy: { createdAt: "desc" } },
+          },
+        });
+        if (!company || company.assets.length === 0) {
+          return {
+            action: "no_in_scope_assets",
+            message: "Create in-scope assets first before scanning.",
+            availableAssets: [],
+          };
+        }
+        const hasWeb = company.assets.some((a) => a.type === "web");
+        const hasIP = company.assets.some((a) => a.type === "network");
+        let recommendedScanType: string;
+        let recommendedGoal: string;
+        let recommendedTarget: string;
+        let reasoning: string;
+        if (hasWeb && !hasIP) {
+          recommendedScanType = "web";
+          recommendedTarget = company.assets[0].target;
+          recommendedGoal = `discover subdomains, open ports, services, and potential entry points on ${recommendedTarget}`;
+          reasoning = "Only web-type assets in scope. Recommending web scan.";
+        } else if (hasIP && !hasWeb) {
+          recommendedScanType = "network";
+          recommendedTarget = company.assets[0].target;
+          recommendedGoal = `enumerate services, OS, vulnerabilities, and admin access on ${recommendedTarget}`;
+          reasoning = "IP-type assets in scope. Recommending network scan.";
+        } else {
+          recommendedScanType = "full";
+          recommendedTarget = company.assets[0].target;
+          recommendedGoal = `comprehensive reconnaissance and exploitation on ${recommendedTarget}`;
+          reasoning = "Mixed web and IP assets in scope. Recommending full scan.";
+        }
+        return {
+          recommendedTarget,
+          recommendedScanType,
+          recommendedGoal,
+          reasoning,
+          availableAssets: company.assets.map((a) => ({
+            id: a.id,
+            name: a.name,
+            type: a.type,
+            target: a.target,
+            groupId: a.groupId,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "artex_scan_full_lifecycle",
+      description:
+        "Run a complete ARTEX scan: verify target in-scope, start scan, poll status, retrieve findings, auto-create assets from findings, and write report document. Input: { target, scanType }. Returns { taskId, status, findings, scanType, newAssets, reportDocumentId, events }. Rejects out-of-scope targets.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "Asset target to scan (must be in-scope)" },
+          scanType: { type: "string", description: "web | network | full" },
+        },
+        required: ["target", "scanType"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { target, scanType } = input as { target: string; scanType: string };
+
+        const company = await db.company.findUnique({
+          where: { userId },
+          include: {
+            assets: { where: { inScope: true } },
+            groups: true,
+          },
+        });
+        if (!company) {
+          return { error: "company_not_found" };
+        }
+
+        const inScopeAsset = company.assets.find((a) => a.target === target);
+        if (!inScopeAsset) {
+          return {
+            error: `out_of_scope_target: ${target} is not in CompanyAsset with inScope === true. Add it as an in-scope asset first.`,
+          };
+        }
+
+        const events: Array<{ type: string; message: string; timestamp: string }> = [];
+        const now = () => new Date().toISOString();
+
+        events.push({
+          type: "scan_started",
+          message: `Starting ${scanType} scan on ${target}`,
+          timestamp: now(),
+        });
+
+        const startResult: any = await artexFetch("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({ target, scanType, options: { goal: `scan ${target}` } }),
+        });
+        const taskId: string = startResult.id;
+
+        events.push({
+          type: "scan_started",
+          message: `Scan started — taskId: ${taskId}`,
+          timestamp: now(),
+        });
+
+        const maxWaitMs = 120000;
+        const pollIntervalMs = 5000;
+        const deadline = Date.now() + maxWaitMs;
+        let status = "running";
+
+        while (Date.now() < deadline) {
+          const statusResult: any = await artexFetch("/api/tasks/" + encodeURIComponent(taskId));
+          status = statusResult.status;
+          if (status !== "running" && status !== "pending") break;
+          await new Promise((r) => setTimeout(r, pollIntervalMs));
+        }
+
+        if (status !== "completed" && status !== "finished") {
+          events.push({
+            type: "scan_failed",
+            message: `Scan did not complete — status: ${status}`,
+            timestamp: now(),
+          });
+          return { taskId, status: status === "running" ? "timeout" : status, findings: [], events };
+        }
+
+        const resultsResult: any = await artexFetch("/api/exploration/findings");
+        const allFindings = Array.isArray(resultsResult) ? resultsResult : resultsResult.findings ?? [];
+        const findings = allFindings
+          .filter((f: any) => f.taskId === taskId || !taskId)
+          .map((f: any) => ({ target: f.target, type: f.type, severity: f.severity, evidence: f.evidence }));
+
+        events.push({
+          type: "scan_completed",
+          message: `Scan completed — ${findings.length} findings`,
+          timestamp: now(),
+        });
+
+        const newAssets: Array<{ id: string; name: string; target: string }> = [];
+        const targetGroup = company.groups?.[0];
+
+        for (const f of findings) {
+          const looksLikeHost = f.type === "ip" || f.type === "host" || f.type === "domain" || f.type === "subdomain";
+          if (!looksLikeHost) continue;
+          const existing = company.assets.find((a) => a.target === f.target);
+          if (existing) continue;
+          const created = await db.companyAsset.create({
+            data: {
+              companyId: company.id,
+              name: f.target,
+              type: "network",
+              target: f.target,
+              inScope: true,
+              details: `Discovered via ${scanType} scan (task ${taskId})`,
+              ...(targetGroup && { groupId: targetGroup.id }),
+            },
+          });
+          newAssets.push({ id: created.id, name: created.name, target: created.target });
+        }
+
+        let reportDocumentId: string | null = null;
+        if (targetGroup) {
+          const docTitle = `${scanType} scan results for ${target}`;
+          const docContent = `## ARTEX ${scanType.toUpperCase()} Scan Report\n\nTarget: ${target}\nTask: ${taskId}\nStatus: ${status}\nFindings: ${findings.length}\nNew Assets: ${newAssets.length}\n`;
+          const doc = await db.reportDocument.create({
+            data: { groupId: targetGroup.id, title: docTitle, content: docContent, version: 1 },
+          });
+          reportDocumentId = doc.id;
+        }
+
+        return { taskId, status, findings, scanType, newAssets, reportDocumentId, events };
+      },
+    },
+
+    {
+      name: "list_report_documents",
+      description:
+        "List report documents for the user's company. Optional input: { groupId? }. Returns documents with id, groupId, groupName, title, content, version, createdAt, updatedAt.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          groupId: { type: "string", description: "Optional group id filter" },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { groupId } = input as { groupId?: string };
+        const company = await db.company.findUnique({
+          where: { userId },
+          include: {
+            groups: {
+              where: groupId ? { id: groupId } : undefined,
+              include: {
+                reportDocuments: { orderBy: { updatedAt: "desc" } },
+              },
+            },
+          },
+        });
+        if (!company) return { documents: [] };
+        const docs = company.groups.flatMap((g) =>
+          g.reportDocuments.map((d) => ({
+            id: d.id,
+            groupId: d.groupId,
+            groupName: g.name,
+            title: d.title,
+            content: d.content,
+            version: d.version,
+            createdAt: d.createdAt,
+            updatedAt: d.updatedAt,
+          }))
+        );
+        return { documents: docs };
+      },
+    },
+
+    {
+      name: "create_report_document",
+      description:
+        "Create a new report document linked to an asset group. Input: { groupId, title, content? }. Returns { ok, document }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          groupId: { type: "string", description: "Asset group id" },
+          title: { type: "string", description: "Document title" },
+          content: { type: "string", description: "Markdown content" },
+        },
+        required: ["groupId", "title"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { groupId, title, content } = input as {
+          groupId: string;
+          title: string;
+          content?: string;
+        };
+        const group = await db.companyAssetGroup.findUnique({
+          where: { id: groupId },
+          include: { company: true },
+        });
+        if (!group) return { error: "group_not_found" };
+        if (group.company.userId !== userId) return { error: "forbidden" };
+        const doc = await db.reportDocument.create({
+          data: { groupId, title, content: content ?? "", version: 1 },
+        });
+        return { ok: true, document: doc };
+      },
+    },
+
+    {
+      name: "update_report_document",
+      description:
+        "Update an existing report document (append content). Input: { id, title?, content? }. Returns { ok, document }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Report document id" },
+          title: { type: "string", description: "New title" },
+          content: { type: "string", description: "Content to append" },
+        },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { id, title, content } = input as {
+          id: string;
+          title?: string;
+          content?: string;
+        };
+        const doc = await db.reportDocument.findUnique({
+          where: { id },
+          include: { group: { include: { company: true } } },
+        });
+        if (!doc) return { error: "not_found" };
+        if (doc.group.company.userId !== userId) return { error: "forbidden" };
+        const updateData: any = {};
+        if (title !== undefined) updateData.title = title;
+        if (content !== undefined) {
+          updateData.content = doc.content ? doc.content + "\n\n---\n\n" + content : content;
+          updateData.version = doc.version + 1;
+        }
+        const updated = await db.reportDocument.update({ where: { id }, data: updateData });
+        return { ok: true, document: updated };
       },
     },
   ];
