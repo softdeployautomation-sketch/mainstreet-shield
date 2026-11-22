@@ -879,12 +879,14 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           };
         }
 
-        const result: any = await artexFetch("/api/tasks", {
-          method: "POST",
-          body: JSON.stringify({ target, scanType, options }),
+        const result: any = await artexMCPCall("artex_scan_start", {
+          target,
+          scanType,
+          options,
+          meta: { origin: "chat", chatSessionId: sessionId, userId, source: "mss-agent-chat" },
         });
         return {
-          taskId: result.id,
+          taskId: result.taskId,
           status: result.status,
           target,
         };
@@ -905,11 +907,11 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
       },
       execute: async (input: unknown) => {
         const { taskId } = input as { taskId: string };
-        const result: any = await artexFetch("/api/tasks/" + encodeURIComponent(taskId));
+        const result: any = await artexMCPCall("artex_scan_status", { taskId });
         return {
           taskId,
           status: result.status,
-          progress: result.progress,
+          progress: result.progress ?? 0,
         };
       },
     },
@@ -928,18 +930,16 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
       },
       execute: async (input: unknown) => {
         const { taskId } = input as { taskId: string };
-        const result: any = await artexFetch("/api/exploration/findings");
-        const findings = Array.isArray(result) ? result : result.findings ?? [];
+        const result: any = await artexMCPCall("artex_scan_results", { taskId });
+        const findings = Array.isArray(result.findings) ? result.findings : [];
         return {
           taskId,
-          findings: findings
-            .filter((f: any) => f.taskId === taskId || !taskId)
-            .map((f: any) => ({
-              target: f.target,
-              type: f.type,
-              severity: f.severity,
-              evidence: f.evidence,
-            })),
+          findings: findings.map((f: any) => ({
+            target: f.target,
+            type: f.type,
+            severity: f.severity,
+            evidence: f.evidence,
+          })),
         };
       },
     },
@@ -958,10 +958,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
       },
       execute: async (input: unknown) => {
         const { taskId } = input as { taskId: string };
-        const result: any = await artexFetch("/api/tasks/" + encodeURIComponent(taskId) + "/control", {
-          method: "POST",
-          body: JSON.stringify({ action: "stop" }),
-        });
+        await artexMCPCall("artex_scan_stop", { taskId });
         return {
           taskId,
           stopped: true,
