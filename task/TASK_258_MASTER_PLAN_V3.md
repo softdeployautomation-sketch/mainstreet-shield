@@ -159,14 +159,27 @@ Admin panel continues to gate tiers, VM, destructive actions. No second policy s
 | 2C-4 | Agent system prompt: MainStreet capabilities map + examples |
 
 ### Batch 3 — P0 Offensive orchestration (after 2B/2C) — **ARTEX sidecar default**
-| ID | Task |
-|---|---|
-| T-0 | **ARTEX-0/1** study doc (clone location outside app repo) |
-| T-1 | Toolbelt install list on lab VM (nmap, nuclei, httpx, …) + `command -v` checks |
-| T-2 | Orchestrator: run approved scan vs `Asset.inScope` → parse JSON → WorkflowStep.result + report |
-| T-3 | Pipeline stages + safety gates (reuse spaceworker `gate.ts` / AUP patterns; admin panel remains tier switch) |
-| T-4 | Auto-workflow from successful steps |
-| T-5 | **ARTEX-2 sidecar** deploy + allowlisted HTTP contract from MainStreet |
+**Architecture rule: Our agent is the brain. ARTEX is tool execution only (engine idle).** ARTEX has its own internal planner (plan → work → guard → prove loop over two graphs: asset + exploration). When our agent spawns a task with a goal, ARTEX's planner autonomously picks tools (nmap, nuclei, httpx, etc.), workers execute them, results write to both graphs. Our agent guides via goal + hints + pause/resume — we do NOT configure LLM inside ARTEX, we do NOT rely on ARTEX's internal planner for security decisions, no AGPL code merged.
+
+**Attack flow (attacker-style loop):**
+1. Asset check: agent lists in-scope assets → if only website present, runs scan to discover more (DNS, IPs, subdomains, services)
+2. Pivot: every discovered asset → create_asset → add_asset_to_group → agent now has more assets to work with
+3. Decide: agent reviews all assets + prior report docs → decides next action (web scan, network scan, credential probing, admin access attempt, service shutdown)
+4. Record: every scan, finding, new asset, and decision → written to ReportDocument linked to asset group, dated, versioned, editable
+5. Repeat: next agent reads the report doc, sees what was tried, classifies further exploration
+
+| ID | Task | Owner |
+|---|---|---|
+| T-0 | **ARTEX-0/1** study doc (clone location outside app repo) | SVE — DONE |
+| T-1 | Toolbelt install list on lab VM (nmap, nuclei, httpx, …) + `command -v` checks | SVE — DONE (ARTEX bundles bbot/142 modules) |
+| T-2 | Orchestrator: `artex_scan_start/status/results/stop` agent tools + HTTP contract | Task Agent — DONE |
+| T-3 | **Scan decision logic**: `decide_scan_target` reads assets, recommends scanType/goal based on asset type | Task Agent |
+| T-4 | **Report documents**: `ReportDocument` model + API + agent tools (`create/update/list_report_document`) linked to `CompanyAssetGroup` | Task Agent |
+| T-5 | **Asset `details` free-text field**: add `details String?` to `CompanyAsset`, update create/update tools | Task Agent |
+| T-6 | **Auto-pivot**: scan findings → `create_asset` → `add_asset_to_group` → write to `ReportDocument` | Task Agent |
+| T-7 | **Transparent UI**: SSE stream of ARTEX task events in chat (status, progress, findings as they arrive) | Task Agent |
+| T-8 | **Pipeline stages + safety gates**: reuse spaceworker `gate.ts` / AUP patterns; admin panel remains tier switch | Task Agent |
+| T-9 | **ARTEX-2 sidecar** deploy + allowlisted HTTP contract from MainStreet | SVE — DONE (running at 127.0.0.1:8787) |
 
 ### Batch 4 — Defense (unchanged intent)
 D-1..D-4 monitoring / alarms — **after** offensive loop proves report sheet.
