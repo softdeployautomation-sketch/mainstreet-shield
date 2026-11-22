@@ -28,7 +28,7 @@ const ARTEX_BASE_URL = process.env.ARTEX_BASE_URL ?? "http://127.0.0.1:8787";
 
 function artexHeaders(): HeadersInit {
   const headers: HeadersInit = { "Content-Type": "application/json" };
-  const token = process.env.ARTEX_API_TOKEN;
+  const token = process.env.ARTEX_MCP_TOKEN;
   if (token) headers["Authorization"] = "Bearer " + token;
   return headers;
 }
@@ -1428,7 +1428,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
     {
       name: "artex_scan_full_lifecycle",
       description:
-        "Run a complete ARTEX scan: verify target in-scope, start scan, poll status, retrieve findings, auto-create assets from findings, and write report document. Input: { target, scanType }. Returns { taskId, status, findings, scanType, newAssets, reportDocumentId, events }. Rejects out-of-scope targets.",
+        "Start an ARTEX scan and return immediately. The scan runs autonomously in ARTEX; progress events stream to chat via SSE (scan_started / scan_progress / scan_completed / scan_failed). Input: { target, scanType }. Returns { taskId, status: 'started' }. Rejects out-of-scope targets.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1482,81 +1482,31 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           timestamp: now(),
         });
 
-        const maxWaitMs = parseInt(process.env.ARTEX_SCAN_MAX_WAIT_MS ?? "600000", 10); // default 10 min for autonomous scans
-        const pollIntervalMs = 5000;
-        const deadline = Date.now() + maxWaitMs;
-        let status = "running";
-        let lastProgress = 0;
-
-        while (Date.now() < deadline) {
-          const statusResult: any = await artexMCPCall("artex_scan_status", { taskId });
-          status = statusResult.status;
-          const progress = statusResult.progress ?? lastProgress;
-          lastProgress = progress;
-          emitScanEvent(sessionId, userId, "scan_progress", {
-            taskId,
-            progress,
-            currentStep: statusResult.currentStep ?? status,
-            message: `⏳ Scan ${progress}% — ${statusResult.currentStep ?? status}`,
-          });
-          if (status !== "running" && status !== "pending") break;
-          await new Promise((r) => setTimeout(r, pollIntervalMs));
-        }
-
-        if (status !== "completed" && status !== "finished") {
-          events.push({
-            type: "scan_failed",
-            message: `Scan did not complete — status: ${status}`,
-            timestamp: now(),
-          });
-          return { taskId, status: status === "running" ? "timeout" : status, findings: [], events };
-        }
-
-        const resultsResult: any = await artexMCPCall("artex_scan_results", { taskId });
-        const allFindings = Array.isArray(resultsResult.findings) ? resultsResult.findings : (Array.isArray(resultsResult) ? resultsResult : []);
-        const findings = allFindings
-          .filter((f: any) => f.taskId === taskId || !taskId)
-          .map((f: any) => ({ target: f.target, type: f.type, severity: f.severity, evidence: f.evidence }));
-
-        events.push({
-          type: "scan_completed",
-          message: `Scan completed — ${findings.length} findings`,
-          timestamp: now(),
-        });
-
-        const newAssets: Array<{ id: string; name: string; target: string }> = [];
-        const targetGroup = company.groups?.[0];
-
-        for (const f of findings) {
-          const looksLikeHost = f.type === "ip" || f.type === "host" || f.type === "domain" || f.type === "subdomain";
-          if (!looksLikeHost) continue;
-          const existing = company.assets.find((a) => a.target === f.target);
-          if (existing) continue;
-          const created = await db.companyAsset.create({
-            data: {
-              companyId: company.id,
-              name: f.target,
-              type: "network",
-              target: f.target,
-              inScope: true,
-              details: `Discovered via ${scanType} scan (task ${taskId})`,
-              ...(targetGroup && { groupId: targetGroup.id }),
+                // WP1: pin this task to the chat session for life (exactly one link).
+        try {
+          await db.agentScanLink.upsert({
+            where: { taskId },
+            update: { chatSessionId: sessionId, userId, origin: "chat", source: "mss-agent-chat" },
+            create: {
+              taskId,
+              chatSessionId: sessionId,
+              userId,
+              origin: "chat",
+              source: "mss-agent-chat",
             },
           });
-          newAssets.push({ id: created.id, name: created.name, target: created.target });
+        } catch {
+          // best-effort binding — the scan is already running in ARTEX
         }
 
-        let reportDocumentId: string | null = null;
-        if (targetGroup) {
-          const docTitle = `${scanType} scan results for ${target}`;
-          const docContent = `## ARTEX ${scanType.toUpperCase()} Scan Report\n\nTarget: ${target}\nTask: ${taskId}\nStatus: ${status}\nFindings: ${findings.length}\nNew Assets: ${newAssets.length}\n`;
-          const doc = await db.reportDocument.create({
-            data: { groupId: targetGroup.id, title: docTitle, content: docContent, version: 1 },
-          });
-          reportDocumentId = doc.id;
-        }
+        emitScanEvent(sessionId, userId, "scan_started", {
+          target,
+          scanType,
+          taskId,
+          message: `🔍 Starting ${scanType} scan on ${target} (task: ${taskId}) — watch results stream here`,
+        });
 
-        return { taskId, status, findings, scanType, newAssets, reportDocumentId, events };
+        return { taskId, status: "started" };
       },
     },
 
