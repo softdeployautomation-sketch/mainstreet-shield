@@ -44,6 +44,140 @@ async function artexFetch(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// ARTEX MCP client — Streamable HTTP transport to sidecar at 127.0.0.1:8787/mcp.
+// Connection is pooled: one Mcp-Session-Id reused across calls (concurrent OK).
+// No AGPL ARTEX code in this repo — HTTP/MCP client only.
+// ---------------------------------------------------------------------------
+
+const ARTEX_MCP_URL = process.env.ARTEX_MCP_URL ?? "http://127.0.0.1:8787/mcp";
+
+// Pooled MCP session id (Streamable HTTP `Mcp-Session-Id`), reused across calls.
+let _mcpSessionId: string | null = null;
+
+// Set for the duration of a Cline turn so MCP scan tools can emit live scan
+// SSE events through the chat stream. Cleared when the turn ends.
+let _turnOnEvent: OnClineEvent | null = null;
+
+function emitScanEvent(
+  type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed",
+  data: unknown,
+): void {
+  _turnOnEvent?.({ type, data } as ClineStreamEvent);
+}
+
+function mcpHeaders(accept = "application/json, text/event-stream"): HeadersInit {
+  const h: HeadersInit = {
+    "Content-Type": "application/json",
+    Accept: accept,
+  };
+  const token = process.env.ARTEX_API_TOKEN;
+  if (token) h["Authorization"] = "Bearer " + token;
+  if (_mcpSessionId) h["Mcp-Session-Id"] = _mcpSessionId;
+  return h;
+}
+
+/**
+ * artexMCPCall — send a JSON-RPC `tools/call` to the ARTEX MCP sidecar over
+ * Streamable HTTP. Returns the parsed `result` field. Reuses the pooled
+ * `Mcp-Session-Id` across calls; concurrent calls are supported.
+ */
+async function artexMCPCall(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+  const id = randomUUID();
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name: toolName, arguments: args },
+  });
+
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 30000);
+
+  let res: Response;
+  try {
+    res = await fetch(ARTEX_MCP_URL, {
+      method: "POST",
+      headers: mcpHeaders(),
+      body,
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  // Pool the session id for subsequent calls (Streamable HTTP).
+  const sessionId = res.headers.get("Mcp-Session-Id");
+  if (sessionId) _mcpSessionId = sessionId;
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`ARTEX MCP tools/call ${toolName} failed (${res.status}): ${text}`);
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+
+  // Direct JSON-RPC response.
+  if (contentType.includes("application/json") && !contentType.includes("text/event-stream")) {
+    const json = (await res.json()) as {
+      jsonrpc?: string;
+      id?: string;
+      result?: unknown;
+      error?: { code?: number; message?: string; data?: unknown };
+    };
+    if (json.error) {
+      throw new Error(
+        `ARTEX MCP ${toolName} error: ${json.error.message ?? JSON.stringify(json.error)}`,
+      );
+    }
+    return json.result;
+  }
+
+  // Event-stream response: read SSE until the message matching our JSON-RPC id.
+  const reader = res.body?.getReader();
+  if (!reader) {
+    throw new Error(`ARTEX MCP ${toolName}: no response body`);
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nlIdx: number;
+      while ((nlIdx = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, nlIdx);
+        buffer = buffer.slice(nlIdx + 2);
+        let eventType = "";
+        let eventData = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event: ")) eventType = line.slice(7);
+          else if (line.startsWith("data: ")) eventData = line.slice(6);
+        }
+        if (!eventData) continue;
+        let payload: any;
+        try {
+          payload = JSON.parse(eventData);
+        } catch {
+          continue;
+        }
+        if (payload && payload.id === id) {
+          if (payload.error) {
+            throw new Error(
+              `ARTEX MCP ${toolName} error: ${payload.error.message ?? JSON.stringify(payload.error)}`,
+            );
+          }
+          return payload.result;
+        }
+      }
+    }
+    throw new Error(`ARTEX MCP ${toolName}: stream ended without result`);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ClineCore singleton — one local, in-process runtime for the MSS Agent.
 // Created lazily on first chat turn so `tsc`/`build` never execute the SDK.
 // ---------------------------------------------------------------------------
@@ -174,7 +308,17 @@ function extractTurnResult(messages: MessageWithMetadata[]): ClineTurnResult {
 // ---------------------------------------------------------------------------
 
 export interface ClineStreamEvent {
-  type: "thinking" | "content" | "tool-call" | "tool-result" | "done" | "error";
+  type:
+    | "thinking"
+    | "content"
+    | "tool-call"
+    | "tool-result"
+    | "done"
+    | "error"
+    | "scan_started"
+    | "scan_progress"
+    | "scan_completed"
+    | "scan_failed";
   data: unknown;
 }
 
@@ -296,6 +440,13 @@ ARTEX orchestration tools (call ARTEX sidecar at 127.0.0.1:8787 via HTTP):
 - artex_scan_status — Check status of a running ARTEX task. Input: { taskId }. Returns { taskId, status, progress }.
 - artex_scan_results — Retrieve findings from a completed ARTEX task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.
 - artex_scan_stop — Stop a running ARTEX task. Input: { taskId }. Returns { taskId, stopped: true }.
+
+ARTEX MCP client tools (Streamable HTTP to sidecar at 127.0.0.1:8787/mcp — agent is the brain, ARTEX is the executor):
+- artex_mcp_scan_start — Start an ARTEX scan via MCP client on an in-scope asset target. Input: { target, scanType?, goal? }. Verify target is in CompanyAsset with inScope === true before calling. Returns { taskId }.
+- artex_mcp_scan_status — Check status of a running ARTEX MCP task. Input: { taskId }. Returns { taskId, status, progress }.
+- artex_mcp_scan_results — Retrieve findings from a completed ARTEX MCP task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.
+- artex_mcp_scan_stop — Stop a running ARTEX MCP task. Input: { taskId }. Returns { taskId, stopped: true }.
+- artex_mcp_asset_list — List assets known to the ARTEX MCP sidecar. Input: {}. Returns { assets: [{ id, name, type, target, groupId, inScope }] }.
 
 Asset write tools (MainStreet company DB):
 - create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset" or "add 164.68.105.96 as an asset"). Target can be a hostname, IP address, URL, or any identifier — no URL validation is applied.
@@ -689,6 +840,222 @@ export function mssTools(userId: string): AgentTool[] {
           taskId,
           stopped: true,
         };
+      },
+    },
+
+    // ------------------------------------------------------------------
+    // ARTEX MCP client tools — Streamable HTTP to sidecar at 127.0.0.1:8787/mcp.
+    // Our agent is the brain; ARTEX is the tool executor. No AGPL ARTEX code
+    // in this repo — HTTP/MCP client only. Concurrent calls supported.
+    // ------------------------------------------------------------------
+
+    {
+      name: "artex_mcp_scan_start",
+      description:
+        "Start an ARTEX scan via MCP client on an in-scope asset target. Input: { target, scanType?, goal? }. Verify target is in CompanyAsset with inScope === true before calling. Returns { taskId }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "Host, IP, or URL to scan (must be in scope)" },
+          scanType: { type: "string", description: "Scan type: network, web, or full (default: network)" },
+          goal: { type: "string", description: "Optional goal for the scan" },
+        },
+        required: ["target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { target, scanType = "network", goal } = input as {
+          target: string;
+          scanType?: string;
+          goal?: string;
+        };
+
+        // Safety: verify target is in scope and owned by user's company
+        const asset = await db.companyAsset.findFirst({
+          where: {
+            target,
+            inScope: true,
+            company: { userId },
+          },
+        });
+        if (!asset) {
+          emitScanEvent("scan_failed", {
+            target,
+            scanType,
+            message: `Target not in scope or not owned by your company: ${target}`,
+          });
+          return {
+            error: "Target not in scope or not owned by your company: " + target,
+          };
+        }
+
+        try {
+          const result: any = await artexMCPCall("artex_scan_start", {
+            target,
+            scanType,
+            goal,
+          });
+          const taskId: string = result.taskId;
+          emitScanEvent("scan_started", {
+            target,
+            scanType,
+            taskId,
+            message: `🔍 Starting ${scanType} scan on ${target} (task: ${taskId})`,
+          });
+          return { taskId };
+        } catch (err) {
+          emitScanEvent("scan_failed", {
+            target,
+            scanType,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            error:
+              "Failed to start MCP scan on " + target + ": " +
+              (err instanceof Error ? err.message : String(err)),
+          };
+        }
+      },
+    },
+
+    {
+      name: "artex_mcp_scan_status",
+      description:
+        "Check status of a running ARTEX MCP task. Input: { taskId }. Returns { taskId, status, progress }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "ARTEX MCP task id" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+        try {
+          const result: any = await artexMCPCall("artex_scan_status", { taskId });
+          const progress = result.progress ?? 0;
+          if (result.status === "running" || result.status === "pending") {
+            emitScanEvent("scan_progress", {
+              taskId,
+              progress,
+              currentStep: result.currentStep ?? result.status,
+              message: `⏳ Scan ${progress}% — ${result.currentStep ?? result.status}`,
+            });
+          }
+          return {
+            taskId,
+            status: result.status,
+            progress,
+          };
+        } catch (err) {
+          emitScanEvent("scan_failed", {
+            taskId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            error:
+              "Failed to get MCP scan status " + taskId + ": " +
+              (err instanceof Error ? err.message : String(err)),
+          };
+        }
+      },
+    },
+
+    {
+      name: "artex_mcp_scan_results",
+      description:
+        "Retrieve findings from a completed ARTEX MCP task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "ARTEX MCP task id" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+        try {
+          const result: any = await artexMCPCall("artex_scan_results", { taskId });
+          const findings = Array.isArray(result.findings) ? result.findings : [];
+          emitScanEvent("scan_completed", {
+            taskId,
+            findings,
+            message: `✅ Scan completed — ${findings.length} findings`,
+          });
+          return {
+            taskId,
+            findings: findings.map((f: any) => ({
+              target: f.target,
+              type: f.type,
+              severity: f.severity,
+              evidence: f.evidence,
+            })),
+          };
+        } catch (err) {
+          emitScanEvent("scan_failed", {
+            taskId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            error:
+              "Failed to get MCP scan results " + taskId + ": " +
+              (err instanceof Error ? err.message : String(err)),
+          };
+        }
+      },
+    },
+
+    {
+      name: "artex_mcp_scan_stop",
+      description:
+        "Stop a running ARTEX MCP task. Input: { taskId }. Returns { taskId, stopped: true }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "ARTEX MCP task id" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId } = input as { taskId: string };
+        try {
+          await artexMCPCall("artex_scan_stop", { taskId });
+          return { taskId, stopped: true };
+        } catch (err) {
+          emitScanEvent("scan_failed", {
+            taskId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            error:
+              "Failed to stop MCP scan " + taskId + ": " +
+              (err instanceof Error ? err.message : String(err)),
+          };
+        }
+      },
+    },
+
+    {
+      name: "artex_mcp_asset_list",
+      description:
+        "List assets known to the ARTEX MCP sidecar. Input: {}. Returns { assets: [{ id, name, type, target, groupId, inScope }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        try {
+          const result: any = await artexMCPCall("artex_mcp_asset_list", {});
+          return { assets: Array.isArray(result.assets) ? result.assets : [] };
+        } catch (err) {
+          return {
+            error: "Failed to list MCP assets: " + (err instanceof Error ? err.message : String(err)),
+          };
+        }
       },
     },
 
@@ -1220,6 +1587,7 @@ export async function startClineSession(
   _sessionUnsub.set(sessionId, unsubscribe);
 
   let resultText = "";
+  _turnOnEvent = onEvent ?? null;
   try {
     const startResult = await core.start({
       config: {
@@ -1264,6 +1632,8 @@ export async function startClineSession(
       error: err instanceof Error ? err.message : String(err),
       clineReady: true,
     };
+  } finally {
+    _turnOnEvent = null;
   }
 
   const messages = await core.readMessages(sessionId).catch(() => [] as MessageWithMetadata[]);
@@ -1346,6 +1716,7 @@ export async function sendClineMessage(
     }
   });
   _sessionUnsub.set(input.sessionId, unsubscribe);
+  _turnOnEvent = onEvent ?? null;
   try {
     await core.send({
       sessionId: input.sessionId,
@@ -1373,6 +1744,8 @@ export async function sendClineMessage(
       status: "failed",
       error: err instanceof Error ? err.message : String(err),
     };
+  } finally {
+    _turnOnEvent = null;
   }
 
   const messages = await core.readMessages(input.sessionId).catch(() => [] as MessageWithMetadata[]);

@@ -9,12 +9,22 @@ interface ToolCall {
   isError?: boolean;
 }
 
+interface ScanEvent {
+  type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed";
+  message: string;
+  taskId?: string;
+  progress?: number | string;
+  currentStep?: string;
+  findings?: unknown[];
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   thinking?: string[];
   tools?: ToolCall[];
+  scanEvents?: ScanEvent[];
 }
 
 interface PendingFile {
@@ -292,6 +302,7 @@ export function AgentChat() {
       let accumulatedContent = "";
       let accumulatedThinking: string[] = [];
       let accumulatedTools: ToolCall[] = [];
+      let accumulatedScanEvents: ScanEvent[] = [];
 
       // Optimistically add the assistant message so streaming can update it in place.
       const assistantMsg: Message = {
@@ -348,6 +359,12 @@ export function AgentChat() {
             clineReady?: boolean;
             message?: string;
             error?: string;
+            scanType?: string;
+            progress?: number | string;
+            currentStep?: string;
+            findings?: unknown[];
+            taskId?: string;
+            scanEvents?: ScanEvent[];
           };
 
           if (eventType === "content") {
@@ -440,6 +457,28 @@ export function AgentChat() {
               ),
             );
             scrollBottom();
+          } else if (
+            eventType === "scan_started" ||
+            eventType === "scan_progress" ||
+            eventType === "scan_completed" ||
+            eventType === "scan_failed"
+          ) {
+            accumulatedScanEvents.push({
+              type: eventType,
+              message: p.message ?? "",
+              ...(p.taskId !== undefined ? { taskId: p.taskId } : {}),
+              ...(p.progress !== undefined ? { progress: p.progress } : {}),
+              ...(p.currentStep !== undefined ? { currentStep: p.currentStep } : {}),
+              ...(p.findings !== undefined ? { findings: p.findings } : {}),
+            });
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, scanEvents: [...accumulatedScanEvents] }
+                  : m,
+              ),
+            );
+            scrollBottom();
           } else if (eventType === "done") {
             setMessages((prev) => {
               return prev.map((m) =>
@@ -449,6 +488,7 @@ export function AgentChat() {
                       content: p.response ?? accumulatedContent,
                       thinking: p.thinking ?? accumulatedThinking,
                       tools: accumulatedTools,
+                      scanEvents: p.scanEvents ?? accumulatedScanEvents,
                     }
                   : m,
               );
@@ -689,6 +729,32 @@ export function AgentChat() {
                       </div>
                     );
                   })}
+                  {msg.scanEvents && msg.scanEvents.length > 0 && (
+                    <div className="break-words whitespace-pre-wrap mb-0.5">
+                      <span className="text-brand-500">🔧 ARTEX MCP scan events</span>
+                      {msg.scanEvents.map((ev, j) => {
+                        const evIcon =
+                          ev.type === "scan_started"
+                            ? "🔍"
+                            : ev.type === "scan_progress"
+                            ? "⏳"
+                            : ev.type === "scan_completed"
+                            ? "✅"
+                            : "❌";
+                        const evColor =
+                          ev.type === "scan_failed"
+                            ? "text-rose-400"
+                            : ev.type === "scan_completed"
+                            ? "text-emerald-400"
+                            : "text-zinc-400";
+                        return (
+                          <div key={j} className="ml-2 break-words whitespace-pre-wrap mb-0.5">
+                            <span className={evColor}>{evIcon} {ev.message}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </details>
             )}
