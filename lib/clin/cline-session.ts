@@ -28,7 +28,7 @@ const ARTEX_BASE_URL = process.env.ARTEX_BASE_URL ?? "http://127.0.0.1:8787";
 
 function artexHeaders(): HeadersInit {
   const headers: HeadersInit = { "Content-Type": "application/json" };
-  const token = process.env.ARTEX_API_TOKEN;
+  const token = process.env.ARTEX_MCP_TOKEN;
   if (token) headers["Authorization"] = "Bearer " + token;
   return headers;
 }
@@ -133,7 +133,7 @@ function mcpHeaders(accept = "application/json, text/event-stream"): HeadersInit
     "Content-Type": "application/json",
     Accept: accept,
   };
-  const token = process.env.ARTEX_API_TOKEN;
+  const token = process.env.ARTEX_MCP_TOKEN;
   if (token) h["Authorization"] = "Bearer " + token;
   if (_mcpSessionId) h["Mcp-Session-Id"] = _mcpSessionId;
   return h;
