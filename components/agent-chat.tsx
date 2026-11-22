@@ -54,6 +54,9 @@ export function AgentChat() {
   const [modelId, setModelId] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Set when the user explicitly starts a new chat, so the auto-load effect
+  // doesn't immediately reopen the most recent conversation.
+  const newChatRef = useRef(false);
 
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -90,6 +93,9 @@ export function AgentChat() {
     let cancelled = false;
     (async () => {
       const rows = await fetchSessions();
+      // User clicked "New chat" — keep the empty conversation; only refresh the
+      // session list, never auto-reopen the last one.
+      if (newChatRef.current) return;
       // Auto-load the most recent session on mount so conversations survive refresh.
       // Preference: stored session (localStorage) > sessions from DB.
       // If fetchSessions() failed (e.g. auth), stored session can still load directly.
@@ -158,6 +164,7 @@ export function AgentChat() {
   }, []);
 
   const newChat = useCallback(() => {
+    newChatRef.current = true;
     setMessages([]);
     setSessionId(null);
     setSessionTitle(null);
@@ -168,6 +175,7 @@ export function AgentChat() {
 
   const switchSession = useCallback(
     async (id: string) => {
+      newChatRef.current = false;
       try {
         const res = await fetch(
           `/api/mss/agent/sessions/${encodeURIComponent(id)}/messages`,
@@ -373,6 +381,19 @@ export function AgentChat() {
 
           if (eventType === "content") {
             if (typeof p.delta === "string") {
+              // Defense: never render serialized SDK protocol events as text.
+              const looksLikeProtocolEvent = (() => {
+                const s = p.delta.trimStart();
+                if (!s.startsWith("{")) return false;
+                try {
+                  const o = JSON.parse(s) as { type?: unknown };
+                  return typeof o?.type === "string" &&
+                    /^(content_start|content_end|content_update|iteration_start|iteration_end|usage|notice)$/.test(o.type);
+                } catch {
+                  return false;
+                }
+              })();
+              if (looksLikeProtocolEvent) continue;
               accumulatedContent += p.delta;
               setMessages((prev) =>
                 prev.map((m) =>

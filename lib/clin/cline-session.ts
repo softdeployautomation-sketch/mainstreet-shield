@@ -305,7 +305,7 @@ function extractTurnResult(messages: MessageWithMetadata[]): ClineTurnResult {
     ];
     for (const block of blocks) {
       if (block.type === "thinking") {
-        const t = block.thinking;
+        const t = cleanReasoningText(block.thinking);
         if (t) thinking.push(t);
       } else if (block.type === "text" && !response) {
         response = block.text;
@@ -339,6 +339,37 @@ export interface ClineStreamEvent {
 
 type OnClineEvent = (event: ClineStreamEvent) => void;
 
+/**
+ * Cline sometimes delivers the whole `content_start` event as the reasoning
+ * string (or a JSONL of them). Extract only the readable text so raw protocol
+ * JSON never reaches the thinking panel.
+ */
+function cleanReasoningText(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const s = raw.trim();
+  if (!s) return "";
+  if (s.startsWith("{")) {
+    try {
+      const obj = JSON.parse(s) as { reasoning?: unknown; text?: unknown };
+      if (typeof obj.reasoning === "string") return obj.reasoning;
+      if (typeof obj.text === "string") return obj.text;
+      return "";
+    } catch {
+      // Concatenated JSONL — pull every readable reasoning/text fragment.
+      const out: string[] = [];
+      for (const m of s.matchAll(/"reasoning":"((?:[^"\\]|\\.)*)"/g)) {
+        try {
+          out.push(JSON.parse(`"${m[1]}"`) as string);
+        } catch {
+          out.push(m[1]);
+        }
+      }
+      return out.join("").trim() || s;
+    }
+  }
+  return s;
+}
+
 /** Phase 0 R4: scan chips persisted with each assistant turn. */
 export interface ScanEvent {
   type: "scan_started" | "scan_progress" | "scan_completed" | "scan_failed";
@@ -367,10 +398,21 @@ function translateCoreEvent(event: CoreSessionEvent): ClineStreamEvent | null {
 
     switch (agentEvent.type) {
       case "content_start":
+        if (agentEvent.contentType === "text") {
+          // Text deltas arrive here (per-delta `text`). This is the ONLY
+          // user-visible content source — the SDK's `chunk` stream is JSON.
+          if (typeof agentEvent.text === "string" && agentEvent.text) {
+            return { type: "content", data: { delta: agentEvent.text } };
+          }
+          break;
+        }
         if (agentEvent.contentType === "reasoning") {
           return {
             type: "thinking",
-            data: { reasoning: agentEvent.reasoning, accumulated: agentEvent.accumulated },
+            data: {
+              reasoning: cleanReasoningText(agentEvent.reasoning),
+              accumulated: agentEvent.accumulated,
+            },
           };
         }
         if (agentEvent.contentType === "tool") {
@@ -382,7 +424,10 @@ function translateCoreEvent(event: CoreSessionEvent): ClineStreamEvent | null {
         break;
       case "content_end":
         if (agentEvent.contentType === "reasoning") {
-          return { type: "thinking", data: { reasoning: agentEvent.reasoning, end: true } };
+          return {
+            type: "thinking",
+            data: { reasoning: cleanReasoningText(agentEvent.reasoning), end: true },
+          };
         }
         if (agentEvent.contentType === "tool") {
           return {
@@ -401,9 +446,11 @@ function translateCoreEvent(event: CoreSessionEvent): ClineStreamEvent | null {
     }
   }
 
-  // --- chunk: raw text deltas streamed from the agent ----------------------
-  if (event.type === "chunk" && event.payload.stream === "agent") {
-    return { type: "content", data: { delta: (event.payload as { chunk: string }).chunk } };
+  // --- chunk: the SDK streams `JSON.stringify(event)` here (stream "agent"),
+  // NOT user text. Never forward it as content — that leaked raw protocol
+  // JSON into the chat bubble. Text is handled via agent_event above.
+  if (event.type === "chunk") {
+    return null;
   }
 
   // --- hook: session tool_call / tool_result -------------------------------
@@ -2003,7 +2050,8 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
         texts.push(role === "user" ? stripUserInput(part.text) : part.text);
     } else if (type === "thinking" || type === "reasoning") {
       const value = part.thinking ?? part.text;
-      if (typeof value === "string" && value.trim()) thinking.push(value);
+      const cleaned = cleanReasoningText(value);
+      if (cleaned) thinking.push(cleaned);
     } else if (type === "tool-call" || type === "tool_use" || type === "tool-call-delta") {
       tools.push({
         toolName: String(part.toolName ?? part.name ?? "tool"),
