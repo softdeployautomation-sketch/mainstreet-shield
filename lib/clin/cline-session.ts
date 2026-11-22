@@ -701,7 +701,7 @@ export function mssTools(userId: string): AgentTool[] {
         type: "object",
         properties: {
           name: { type: "string", description: "Asset display name" },
-          type: { type: "string", description: "web | api | network | mobile" },
+          type: { type: "string", description: "web | api | network | mobile | other" },
           target: { type: "string", description: "Host, IP, URL, or target identifier" },
           inScope: { type: "boolean", description: "Whether the asset is in scope (default true)" },
           groupId: { type: "string", description: "Optional group id to assign the asset to" },
@@ -752,7 +752,7 @@ export function mssTools(userId: string): AgentTool[] {
         properties: {
           id: { type: "string", description: "Asset id" },
           name: { type: "string", description: "New display name" },
-          type: { type: "string", description: "web | api | network | mobile" },
+          type: { type: "string", description: "web | api | network | mobile | other" },
           target: { type: "string", description: "New host, IP, URL, or target" },
           inScope: { type: "boolean", description: "Whether the asset is in scope" },
           groupId: { type: "string", description: "Group id to assign (or null to unassign)" },
@@ -1416,7 +1416,7 @@ export async function readClineMessages(sessionId: string): Promise<MessageWithM
   // B-3: DB-first — session transcripts survive ClineCore recreation.
   const rows = await db.clineAgentMessage.findMany({
     where: { sessionId },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   const dbMessages = rows.map((row) => clineAgentMessageToMessage(row));
 
@@ -1523,7 +1523,17 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
     }
   }
 
-  if (texts.length === 0 && thinking.length === 0 && tools.length === 0) return null;
+  // Fix 4: don't filter out empty-content messages — return them with empty
+  // content so user messages aren't lost from transcripts.
+  if (texts.length === 0 && thinking.length === 0 && tools.length === 0) {
+    return {
+      id: typeof m.id === "string" ? m.id : randomUUID(),
+      role,
+      content: "",
+      thinking: [],
+      tools: [],
+    };
+  }
 
   return {
     id: typeof m.id === "string" ? m.id : randomUUID(),
@@ -1554,7 +1564,8 @@ function clineAgentMessageToMessage(row: {
   createdAt: Date;
 }): MessageWithMetadata {
   const c = row.content as { text?: string; thinking?: string[] } | null;
-  const text = c?.text ?? "";
+  // Handle both object content { text, thinking } and plain string content.
+  const text = typeof row.content === "string" ? row.content : c?.text ?? "";
   const thinking = c?.thinking ?? [];
   const blocks: ContentBlock[] = [{ type: "text", text }];
   for (const t of thinking) blocks.push({ type: "thinking", thinking: t });

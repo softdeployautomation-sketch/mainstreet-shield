@@ -180,12 +180,44 @@ export function AgentChat() {
         setSessionTitle(sessions.find((s) => s.id === id)?.title ?? null);
         setError("");
         setSessionsPanelOpen(false);
+        // Refresh session list so newly created sessions appear immediately.
+        await fetchSessions();
       } catch (err) {
         // B-3: surface session-switch errors instead of silently swallowing them.
         setError(err instanceof Error ? err.message : "Failed to load conversation");
       }
     },
     [sessions],
+  );
+
+  // --- session delete ------------------------------------------------------
+
+  const deleteSession = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(
+          `/api/mss/agent/sessions/${encodeURIComponent(id)}`,
+          {
+            method: "DELETE",
+            credentials: "same-origin",
+          },
+        );
+        if (!res.ok) {
+          setError(`Failed to delete conversation (${res.status})`);
+          return;
+        }
+        setSessions((prev) => prev.filter((s) => s.id !== id));
+        if (sessionId === id) {
+          setSessionId(null);
+          setSessionTitle(null);
+          setMessages([]);
+          setError("");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete conversation");
+      }
+    },
+    [sessionId],
   );
 
   // --- file attach (A-0c) --------------------------------------------------
@@ -439,7 +471,7 @@ export function AgentChat() {
                 ];
               });
               // Refresh from DB to reflect title/status after creation
-              void fetchSessions();
+              await fetchSessions();
             }
             if (p.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
             scrollBottom();
@@ -551,17 +583,32 @@ export function AgentChat() {
               </div>
             )}
             {sessions.map((s) => (
-              <button
+              <div
                 key={s.id}
-                onClick={() => void switchSession(s.id)}
-                className="w-full text-left px-3 py-2 text-xs text-fg hover:bg-bg-elevated/50 border-b border-border/50"
+                className="flex items-center justify-between px-3 py-2 border-b border-border/50"
               >
-                <div className="font-mono truncate">{s.title ?? s.id.slice(-8)}</div>
-                <div className="text-[10px] text-fg-muted truncate">
-                  {new Date(s.startedAt).toLocaleString()} ·
-                  {s.status}
-                </div>
-              </button>
+                <button
+                  onClick={() => void switchSession(s.id)}
+                  className="flex-1 text-left text-xs text-fg hover:bg-bg-elevated/50 rounded-l"
+                  disabled={sending || s.id === sessionId}
+                >
+                  <div className="font-mono truncate">{s.title ?? s.id.slice(-8)}</div>
+                  <div className="text-[10px] text-fg-muted truncate">
+                    {new Date(s.startedAt).toLocaleString()} ·
+                    {s.status}
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteSession(s.id);
+                  }}
+                  className="px-1.5 py-1 text-xs text-fg-muted hover:text-rose-400 hover:bg-rose-900/20 rounded-r"
+                  title="Delete conversation"
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         </div>
