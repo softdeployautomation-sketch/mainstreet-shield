@@ -30,6 +30,7 @@ interface GroupRow {
   id: string;
   name: string;
   assetCount: number;
+  reportDocuments: { id: string; groupId: string; groupName: string; title: string; content: string; version: number; createdAt: Date; updatedAt: Date }[];
 }
 
 export default async function AssetsPage() {
@@ -57,6 +58,11 @@ export default async function AssetsPage() {
       },
       groups: {
         orderBy: { name: "asc" },
+        include: {
+          reportDocuments: {
+            orderBy: { updatedAt: "desc" },
+          },
+        },
       },
     },
   });
@@ -76,6 +82,16 @@ export default async function AssetsPage() {
     id: g.id,
     name: g.name,
     assetCount: assets.filter((a) => a.groupId === g.id).length,
+    reportDocuments: (g.reportDocuments ?? []).map((d) => ({
+      id: d.id,
+      groupId: d.groupId,
+      groupName: g.name,
+      title: d.title,
+      content: d.content,
+      version: d.version,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+    })),
   }));
   const canManage = user.tier === "5" || user.role === "admin";
   const hasCompany = !!company;
@@ -328,6 +344,26 @@ export default async function AssetsPage() {
                         ))}
                       </tbody>
                     </table>
+                    {/* Reports for this group */}
+                    {g.reportDocuments.length > 0 && (
+                      <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4">
+                        <h4 className="text-xs font-mono font-bold text-fg-muted uppercase mb-3">
+                          Reports ({g.reportDocuments.length})
+                        </h4>
+                        <div className="max-h-48 overflow-y-auto border border-border rounded p-2 space-y-2">
+                          {g.reportDocuments.map((doc) => (
+                            <div key={doc.id} className="flex items-start gap-2 px-2 py-1 rounded hover:bg-border/50 cursor-pointer group">
+                              <Link href={`/dashboard/reports/${doc.id}`} className="text-sm font-mono text-brand-600 hover:text-brand-400 dark:hover:text-brand-400">
+                                {doc.title}
+                              </Link>
+                              <div className="text-xs text-fg-muted flex-1">
+                                <div className="font-mono">v{doc.version} • {new Date(doc.updatedAt).toLocaleDateString()}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

@@ -8,6 +8,48 @@ const updateReportDocSchema = z.object({
   content: z.string().optional(),
 });
 
+// GET /api/mss/agent/report-documents/[id] — get a single report document
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+
+  const pw = await requirePasswordUser(session);
+  if (!pw.user || pw.needPassword) {
+    return NextResponse.json({ error: "password required" }, { status: 403 });
+  }
+
+  const { id } = await params;
+
+  const doc = await db.reportDocument.findUnique({
+    where: { id },
+    include: { group: { include: { company: true } } },
+  });
+  if (!doc) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  if (doc.group.company.userId !== session.userId) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  return NextResponse.json({
+    document: {
+      id: doc.id,
+      groupId: doc.groupId,
+      groupName: doc.group.name,
+      title: doc.title,
+      content: doc.content,
+      version: doc.version,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    },
+  });
+}
+
 // PATCH /api/mss/agent/report-documents/[id] — update report document
 export async function PATCH(
   req: Request,

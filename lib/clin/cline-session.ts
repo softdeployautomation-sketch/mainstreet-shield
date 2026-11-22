@@ -21,41 +21,7 @@ import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { publishScanEvent } from "@/lib/mss/scan-events";
 
-// ---------------------------------------------------------------------------
-// ARTEX sidecar HTTP contract (AGPL-safe: sidecar is a separate service,
-// MainStreet calls it via HTTP only — no ARTEX code in this repo).
-// ---------------------------------------------------------------------------
-const ARTEX_BASE_URL = process.env.ARTEX_BASE_URL ?? "http://127.0.0.1:8787";
 
-function artexHeaders(): HeadersInit {
-  const headers: HeadersInit = { "Content-Type": "application/json" };
-  const token = process.env.ARTEX_MCP_TOKEN;
-  if (token) headers["Authorization"] = "Bearer " + token;
-  return headers;
-}
-
-async function artexFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(`${ARTEX_BASE_URL}${path}`, {
-    ...init,
-    headers: { ...artexHeaders(), ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error("ARTEX " + (init?.method ?? "GET") + " " + path + " failed (" + res.status + "): " + body);
-  }
-  return res.json();
-}
-
-// ---------------------------------------------------------------------------
-// ARTEX MCP client — Streamable HTTP transport to sidecar at 127.0.0.1:8787/mcp.
-// Connection is pooled: one Mcp-Session-Id reused across calls (concurrent OK).
-// No AGPL ARTEX code in this repo — HTTP/MCP client only.
-// ---------------------------------------------------------------------------
-
-const ARTEX_MCP_URL = process.env.ARTEX_MCP_URL ?? "http://127.0.0.1:8787/mcp";
-
-// Pooled MCP session id (Streamable HTTP `Mcp-Session-Id`), reused across calls.
-let _mcpSessionId: string | null = null;
 
 // Phase 0 R5: per-session turn handlers (not a process-global) so concurrent
 // chat sessions never cross-wire scan SSE events. Cleared when that turn ends.
@@ -75,7 +41,7 @@ function emitScanEvent(
   // Phase 0: in-turn chat SSE (per-turn handlers; no cross-session leakage).
   _turnHandlers.get(sessionId)?.({ type, data } as ClineStreamEvent);
 
-  // WP1: when the event carries an ARTEX taskId, durably persist it and fan
+  // WP1: when the event carries a taskId, durably persist it and fan
   // it out to the user's SSE bus (C4: scan_event { sessionId, taskId, type,
   // message, progress?, currentStep? }). Events without a taskId (e.g.
   // out-of-scope target) stay in-turn only.
@@ -127,137 +93,6 @@ function isSessionMissingError(err: unknown): boolean {
   if (e.code === "session_not_found") return true;
   const msg = e.message ?? String(err);
   return /session_not_found|session not found|unusable session|session_run_in_progress/i.test(msg);
-}
-
-function mcpHeaders(accept = "application/json, text/event-stream"): HeadersInit {
-  const h: HeadersInit = {
-    "Content-Type": "application/json",
-    Accept: accept,
-  };
-  const token = process.env.ARTEX_MCP_TOKEN;
-  if (token) h["Authorization"] = "Bearer " + token;
-  if (_mcpSessionId) h["Mcp-Session-Id"] = _mcpSessionId;
-  return h;
-}
-
-/**
- * artexMCPCall — send a JSON-RPC `tools/call` to the ARTEX MCP sidecar over
- * Streamable HTTP. Returns the parsed `result` field. Reuses the pooled
- * `Mcp-Session-Id` across calls; concurrent calls are supported.
- */
-async function artexMCPCall(toolName: string, args: Record<string, unknown>): Promise<unknown> {
-  const id = randomUUID();
-  const body = JSON.stringify({
-    jsonrpc: "2.0",
-    id,
-    method: "tools/call",
-    params: { name: toolName, arguments: args },
-  });
-
-  const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), 30000);
-
-  let res: Response;
-  try {
-    res = await fetch(ARTEX_MCP_URL, {
-      method: "POST",
-      headers: mcpHeaders(),
-      body,
-      signal: ctrl.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  // Pool the session id for subsequent calls (Streamable HTTP).
-  const sessionId = res.headers.get("Mcp-Session-Id");
-  if (sessionId) _mcpSessionId = sessionId;
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`ARTEX MCP tools/call ${toolName} failed (${res.status}): ${text}`);
-  }
-
-  const contentType = res.headers.get("content-type") ?? "";
-
-  // Parse an MCP tool result: unwrap { content: [{ text: "JSON", type: "text" }] }
-  // into the parsed JSON object, or return the raw result if it's already shaped.
-  function unwrapMCPResult(result: unknown): unknown {
-    if (result && typeof result === "object" && "content" in result) {
-      const content = (result as { content: Array<{ text?: string; type?: string }> }).content;
-      if (Array.isArray(content) && content.length > 0) {
-        const text = content[0].text;
-        if (typeof text === "string") {
-          try {
-            return JSON.parse(text);
-          } catch {
-            // fall through to return raw result
-          }
-        }
-      }
-    }
-    return result;
-  }
-
-  // Direct JSON-RPC response.
-  if (contentType.includes("application/json") && !contentType.includes("text/event-stream")) {
-    const json = (await res.json()) as {
-      jsonrpc?: string;
-      id?: string;
-      result?: unknown;
-      error?: { code?: number; message?: string; data?: unknown };
-    };
-    if (json.error) {
-      throw new Error(
-        `ARTEX MCP ${toolName} error: ${json.error.message ?? JSON.stringify(json.error)}`,
-      );
-    }
-    return unwrapMCPResult(json.result);
-  }
-
-  // Event-stream response: read SSE until the message matching our JSON-RPC id.
-  const reader = res.body?.getReader();
-  if (!reader) {
-    throw new Error(`ARTEX MCP ${toolName}: no response body`);
-  }
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let nlIdx: number;
-      while ((nlIdx = buffer.indexOf("\n\n")) !== -1) {
-        const block = buffer.slice(0, nlIdx);
-        buffer = buffer.slice(nlIdx + 2);
-        let eventType = "";
-        let eventData = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event: ")) eventType = line.slice(7);
-          else if (line.startsWith("data: ")) eventData = line.slice(6);
-        }
-        if (!eventData) continue;
-        let payload: any;
-        try {
-          payload = JSON.parse(eventData);
-        } catch {
-          continue;
-        }
-        if (payload && payload.id === id) {
-          if (payload.error) {
-            throw new Error(
-              `ARTEX MCP ${toolName} error: ${payload.error.message ?? JSON.stringify(payload.error)}`,
-            );
-          }
-          return unwrapMCPResult(payload.result);
-        }
-      }
-    }
-    throw new Error(`ARTEX MCP ${toolName}: stream ended without result`);
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -624,17 +459,18 @@ MSS-specific tools:
 Asset write tools (MainStreet company DB):
 - create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset" or "add 164.68.105.96 as an asset"). Target can be a hostname, IP address, URL, or any identifier — no URL validation is applied.
 - update_asset — Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Use when the user wants to change an asset's name, scope, type, target, or group.
-- add_asset_to_group — Assign an existing asset to a group. Input: { id, groupId }. Use when the user wants to organize an asset under a group.
+- mss_add_asset_to_group — Add an existing CompanyAsset to an asset group. Input: { taskId, assetId, groupId }. Verifies ownership (C1), verifies asset and group belong to user's company, sets CompanyAsset.groupId. Returns { ok: true, assetId, groupId }.
 
 - decide_scan_target — Analyze existing in-scope assets and recommend a scan target + scanType. Input: {}. Use before starting a scan to pick the best target based on what assets exist.
 
 Report document tools:
-- list_report_documents — List report documents for the user's company. Optional input: { groupId? }.
-- create_report_document — Create a new report document linked to an asset group. Input: { groupId, title, content? }.
-- update_report_document — Update an existing report document (append content). Input: { id, title?, content? }.
+- mss_list_report_documents — List report documents for the user's company, optionally filtered by groupId. Input: { taskId, groupId? }. Returns { documents: [...] }.
+- mss_create_report_document — Create a report document for an asset group. Input: { taskId, groupId, title, content? }. Verifies ownership (C1), verifies group belongs to user's company. Creates ReportDocument row linked to CompanyAssetGroup. Returns { id, groupId, title, version }.
+- mss_update_report_document — Append content to an existing report document (versioned). Input: { taskId, reportId, title?, content? }. Appends content with --- separator, increments version. Returns { id, version, content }.
 
 Rules:
 - Set goals, constraints, intents, and hints before calling any scanner tool. Scanner tools without prior goal/constraint setup are unauthorized.
+- NEVER mention "ARTEX" as a scanner. There is no ARTEX scanner tool in this system. Only report results from scanner tools that were actually executed (nmap, nuclei, ffuf, httpx, katana, dalfox, sqlmap, hydra, masscan, bbot). Do not fabricate scanner names, scan results, or tool names. If a scanner binary is not available, report "binary not available" — do not substitute with ARTEX.
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
 - Prefer explanation and safe validation; ask before any destructive action.
@@ -643,7 +479,7 @@ Rules:
 If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").`;
 
 // Allow-listed commands that runSafe() may execute. dig/nslookup/curl are the
-// original read-only probes; the scanner binaries are the ARTEX port (P1).
+// original read-only probes; the scanner binaries are the MSS port (WP5).
 const SCANNER_ALLOW_LIST = new Set([
   "dig",
   "nslookup",
@@ -705,6 +541,7 @@ interface ScanLinkSource {
   coverage?: Array<{ assetId: string; type: "tested" | "untested" }>;
   credentials?: Array<{ id: string; username: string; password?: string; key?: string; port?: number }>;
   scope?: string[];
+  groups?: string[];
   workerOutput?: string;
   workerTraces?: Array<{ stepId: string; output: string; timestamp: string }>;
 }
@@ -2317,6 +2154,39 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           data: { source: JSON.stringify(source) },
         });
 
+        // Also set the asset's groupId so it shows grouped in UI
+        const asset = await db.companyAsset.findUnique({ where: { id: assetId } });
+        if (asset) {
+          const company = await db.company.findUnique({ where: { id: asset.companyId } });
+          let groupId: string | null = null;
+          if (Array.isArray(source.groups) && source.groups[0]) {
+            groupId = source.groups[0];
+          } else if (company) {
+            const existingGroups = await db.companyAssetGroup.findMany({
+              where: { companyId: company.id },
+              take: 1,
+            });
+            if (existingGroups.length > 0) {
+              groupId = existingGroups[0].id;
+            } else {
+              const defaultGroup = await db.companyAssetGroup.create({
+                data: { companyId: company.id, name: "Task Scope" },
+              });
+              groupId = defaultGroup.id;
+              if (!Array.isArray(source.groups)) source.groups = [];
+              source.groups.push(groupId);
+              await db.agentScanLink.update({
+                where: { taskId },
+                data: { source: JSON.stringify(source) },
+              });
+            }
+          }
+          await db.companyAsset.update({
+            where: { id: assetId },
+            data: { groupId },
+          });
+        }
+
         emitScanEvent(sessionId, userId, "scan_progress", {
           taskId,
           currentStep: "task_scope_updated",
@@ -2325,6 +2195,89 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         });
 
         return { ok: true };
+      },
+    },
+
+    {
+      name: "mss_add_asset_to_group",
+      description:
+        "Add an existing CompanyAsset to an asset group. Input: { taskId, assetId, groupId }. Verifies ownership (C1), verifies asset belongs to user's company, verifies group belongs to user's company, sets CompanyAsset.groupId. Returns { ok: true, assetId, groupId }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            description: "Scan task id for ownership verification",
+          },
+          assetId: {
+            type: "string",
+            description: "CompanyAsset id to group",
+          },
+          groupId: {
+            type: "string",
+            description: "CompanyAssetGroup id to add asset to",
+          },
+        },
+        required: ["taskId", "assetId", "groupId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, assetId, groupId } = input as {
+          taskId: string;
+          assetId: string;
+          groupId: string;
+        };
+
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) {
+          return { error: "scan_task_not_found" };
+        }
+        if (link.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const asset = await db.companyAsset.findUnique({ where: { id: assetId } });
+        if (!asset) {
+          return { error: "asset_not_found" };
+        }
+        const assetCompany = await db.company.findUnique({ where: { id: asset.companyId } });
+        if (!assetCompany || assetCompany.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        const group = await db.companyAssetGroup.findUnique({ where: { id: groupId } });
+        if (!group) {
+          return { error: "group_not_found" };
+        }
+        const groupCompany = await db.company.findUnique({ where: { id: group.companyId } });
+        if (!groupCompany || groupCompany.userId !== userId) {
+          return { error: "forbidden" };
+        }
+
+        await db.companyAsset.update({
+          where: { id: assetId },
+          data: { groupId },
+        });
+
+        const source = readLinkSource(link);
+        if (!Array.isArray(source.groups)) source.groups = [];
+        if (!source.groups.includes(groupId)) {
+          source.groups.push(groupId);
+        }
+        await db.agentScanLink.update({
+          where: { taskId },
+          data: { source: JSON.stringify(source) },
+        });
+
+        emitScanEvent(sessionId, userId, "scan_progress", {
+          taskId,
+          currentStep: "asset_added_to_group",
+          message: `📂 Asset ${assetId} added to group ${groupId}`,
+          assetId,
+          groupId,
+        });
+
+        return { ok: true, assetId, groupId };
       },
     },
 
@@ -2571,6 +2524,98 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           })),
           group: { id: group.id, name: group.name },
         };
+      },
+    },
+
+    {
+      name: "mss_create_report_document",
+      description: "Create a report document for an asset group. Input: { taskId, groupId, title, content? }. Verifies ownership (C1), verifies group belongs to user's company. Creates ReportDocument row linked to CompanyAssetGroup. Returns { id, groupId, title, version }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id for ownership verification" },
+          groupId: { type: "string", description: "CompanyAssetGroup id to link report to" },
+          title: { type: "string", description: "Report document title" },
+          content: { type: "string", description: "Optional initial markdown content" },
+        },
+        required: ["taskId", "groupId", "title"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, groupId, title, content } = input as { taskId: string; groupId: string; title: string; content?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const group = await db.companyAssetGroup.findUnique({ where: { id: groupId } });
+        if (!group) return { error: "group_not_found" };
+        const company = await db.company.findUnique({ where: { id: group.companyId } });
+        if (!company || company.userId !== userId) return { error: "forbidden" };
+        const report = await db.reportDocument.create({ data: { groupId, title, content: content ?? "", version: 1 } });
+        emitScanEvent(sessionId, userId, "scan_progress", { taskId, currentStep: "report_document_created", message: `📄 Report document created: ${title}`, groupId, reportId: report.id });
+        return { id: report.id, groupId: report.groupId, title: report.title, version: report.version };
+      },
+    },
+
+    {
+      name: "mss_update_report_document",
+      description: "Append content to an existing report document (versioned). Input: { taskId, reportId, title?, content? }. Appends content with --- separator, increments version. Returns { id, version, content }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id for ownership verification" },
+          reportId: { type: "string", description: "ReportDocument id to update" },
+          title: { type: "string", description: "Optional new title" },
+          content: { type: "string", description: "Content to append" },
+        },
+        required: ["taskId", "reportId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, reportId, title, content } = input as { taskId: string; reportId: string; title?: string; content?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const report = await db.reportDocument.findUnique({ where: { id: reportId } });
+        if (!report) return { error: "report_not_found" };
+        const group = await db.companyAssetGroup.findUnique({ where: { id: report.groupId } });
+        if (!group) return { error: "group_not_found" };
+        const company = await db.company.findUnique({ where: { id: group.companyId } });
+        if (!company || company.userId !== userId) return { error: "forbidden" };
+        const newContent = content ? `${report.content}\n---\n${content}` : report.content;
+        const newTitle = title ?? report.title;
+        const updated = await db.reportDocument.update({ where: { id: reportId }, data: { title: newTitle, content: newContent, version: report.version + 1 } });
+        emitScanEvent(sessionId, userId, "scan_progress", { taskId, currentStep: "report_document_updated", message: `📄 Report document updated: ${updated.title} (v${updated.version})`, reportId: updated.id });
+        return { id: updated.id, version: updated.version, content: updated.content };
+      },
+    },
+
+    {
+      name: "mss_list_report_documents",
+      description: "List report documents for the user's company, optionally filtered by groupId. Input: { taskId, groupId? }. Returns { documents: [...] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          taskId: { type: "string", description: "Scan task id for ownership verification" },
+          groupId: { type: "string", description: "Optional CompanyAssetGroup id filter" },
+        },
+        required: ["taskId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { taskId, groupId } = input as { taskId: string; groupId?: string };
+        const link = await db.agentScanLink.findUnique({ where: { taskId } });
+        if (!link) return { error: "scan_task_not_found" };
+        if (link.userId !== userId) return { error: "forbidden" };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const groups = await db.companyAssetGroup.findMany({ where: { companyId: company.id }, select: { id: true } });
+        const groupIds = groups.map((g) => g.id);
+        const documents = await db.reportDocument.findMany({
+          where: { groupId: { in: groupIds }, ...(groupId ? { groupId } : {}) },
+          include: { group: { select: { id: true, name: true } } },
+          orderBy: { updatedAt: "desc" },
+        });
+        return { documents: documents.map((d) => ({ id: d.id, groupId: d.groupId, groupName: d.group?.name, title: d.title, version: d.version, createdAt: d.createdAt, updatedAt: d.updatedAt })) };
       },
     },
 
@@ -3130,362 +3175,6 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         };
       },
     },
-    {
-      name: "artex_scan_start",
-      description:
-        "Start an ARTEX scan on an in-scope asset target. Input: { target, scanType?, options? }. Verify target is in CompanyAsset with inScope === true before calling. Returns { taskId, status, target }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          target: { type: "string", description: "Host, IP, or URL to scan (must be in scope)" },
-          scanType: { type: "string", description: "Scan type: network, web, or full (default: network)" },
-          options: { type: "object", description: "Optional passthrough config for ARTEX task" },
-        },
-        required: ["target"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { target, scanType = "network", options } = input as {
-          target: string;
-          scanType?: string;
-          options?: Record<string, unknown>;
-        };
-
-        // Safety: verify target is in scope and owned by user's company
-        const asset = await db.companyAsset.findFirst({
-          where: {
-            target,
-            inScope: true,
-            company: { userId },
-          },
-        });
-        if (!asset) {
-          return {
-            error:
-              "Target not in scope or not owned by your company: " + target,
-          };
-        }
-
-        const result: any = await artexMCPCall("artex_scan_start", {
-          target,
-          scanType,
-          options,
-          meta: { origin: "chat", chatSessionId: sessionId, userId, source: "mss-agent-chat" },
-        });
-        return {
-          taskId: result.taskId,
-          status: result.status,
-          target,
-        };
-      },
-    },
-
-    {
-      name: "artex_scan_status",
-      description:
-        "Check status of a running ARTEX task. Input: { taskId }. Returns { taskId, status, progress }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          taskId: { type: "string", description: "ARTEX task id" },
-        },
-        required: ["taskId"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { taskId } = input as { taskId: string };
-        const result: any = await artexMCPCall("artex_scan_status", { taskId });
-        return {
-          taskId,
-          status: result.status,
-          progress: result.progress ?? 0,
-        };
-      },
-    },
-
-    {
-      name: "artex_scan_results",
-      description:
-        "Retrieve findings from a completed ARTEX task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          taskId: { type: "string", description: "ARTEX task id" },
-        },
-        required: ["taskId"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { taskId } = input as { taskId: string };
-        const result: any = await artexMCPCall("artex_scan_results", { taskId });
-        const findings = Array.isArray(result.findings) ? result.findings : [];
-        return {
-          taskId,
-          findings: findings.map((f: any) => ({
-            target: f.target,
-            type: f.type,
-            severity: f.severity,
-            evidence: f.evidence,
-          })),
-        };
-      },
-    },
-
-    {
-      name: "artex_scan_stop",
-      description:
-        "Stop a running ARTEX task. Input: { taskId }. Returns { taskId, stopped: true }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          taskId: { type: "string", description: "ARTEX task id" },
-        },
-        required: ["taskId"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { taskId } = input as { taskId: string };
-        await artexMCPCall("artex_scan_stop", { taskId });
-        return {
-          taskId,
-          stopped: true,
-        };
-      },
-    },
-
-    // ------------------------------------------------------------------
-    // ARTEX MCP client tools — Streamable HTTP to sidecar at 127.0.0.1:8787/mcp.
-    // Our agent is the brain; ARTEX is the tool executor. No AGPL ARTEX code
-    // in this repo — HTTP/MCP client only. Concurrent calls supported.
-    // ------------------------------------------------------------------
-
-    {
-      name: "artex_mcp_scan_start",
-      description:
-        "Start an ARTEX scan via MCP client on an in-scope asset target. Input: { target, scanType?, goal? }. Verify target is in CompanyAsset with inScope === true before calling. Returns { taskId }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          target: { type: "string", description: "Host, IP, or URL to scan (must be in scope)" },
-          scanType: { type: "string", description: "Scan type: network, web, or full (default: network)" },
-          goal: { type: "string", description: "Optional goal for the scan" },
-        },
-        required: ["target"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { target, scanType = "network", goal } = input as {
-          target: string;
-          scanType?: string;
-          goal?: string;
-        };
-
-        // Safety: verify target is in scope and owned by user's company
-        const asset = await db.companyAsset.findFirst({
-          where: {
-            target,
-            inScope: true,
-            company: { userId },
-          },
-        });
-        if (!asset) {
-          emitScanEvent(sessionId, userId, "scan_failed", {
-            target,
-            scanType,
-            message: `Target not in scope or not owned by your company: ${target}`,
-          });
-          return {
-            error: "Target not in scope or not owned by your company: " + target,
-          };
-        }
-
-        try {
-          const result: any = await artexMCPCall("artex_scan_start", {
-            target,
-            scanType,
-            goal,
-            // C1: chat-origin scans pin meta incl. the chat session id.
-            meta: { origin: "chat", chatSessionId: sessionId, userId, source: "mss-agent-chat" },
-          });
-          const taskId: string = result.taskId;
-          // WP1: pin this task to the chat session for life (exactly one link).
-          try {
-            await db.agentScanLink.upsert({
-              where: { taskId },
-              update: { chatSessionId: sessionId, userId, origin: "chat", source: "mss-agent-chat" },
-              create: {
-                taskId,
-                chatSessionId: sessionId,
-                userId,
-                origin: "chat",
-                source: "mss-agent-chat",
-              },
-            });
-          } catch {
-            // best-effort binding — the scan is already running in ARTEX
-          }
-          emitScanEvent(sessionId, userId, "scan_started", {
-            target,
-            scanType,
-            taskId,
-            message: `🔍 Starting ${scanType} scan on ${target} (task: ${taskId})`,
-          });
-          return { taskId };
-        } catch (err) {
-          emitScanEvent(sessionId, userId, "scan_failed", {
-            target,
-            scanType,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return {
-            error:
-              "Failed to start MCP scan on " + target + ": " +
-              (err instanceof Error ? err.message : String(err)),
-          };
-        }
-      },
-    },
-
-    {
-      name: "artex_mcp_scan_status",
-      description:
-        "Check status of a running ARTEX MCP task. Input: { taskId }. Returns { taskId, status, progress }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          taskId: { type: "string", description: "ARTEX MCP task id" },
-        },
-        required: ["taskId"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { taskId } = input as { taskId: string };
-        try {
-          const result: any = await artexMCPCall("artex_scan_status", { taskId });
-          const progress = result.progress ?? 0;
-          if (result.status === "running" || result.status === "pending") {
-            emitScanEvent(sessionId, userId, "scan_progress", {
-              taskId,
-              progress,
-              currentStep: result.currentStep ?? result.status,
-              message: `⏳ Scan ${progress}% — ${result.currentStep ?? result.status}`,
-            });
-          }
-          return {
-            taskId,
-            status: result.status,
-            progress,
-          };
-        } catch (err) {
-          emitScanEvent(sessionId, userId, "scan_failed", {
-            taskId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return {
-            error:
-              "Failed to get MCP scan status " + taskId + ": " +
-              (err instanceof Error ? err.message : String(err)),
-          };
-        }
-      },
-    },
-
-    {
-      name: "artex_mcp_scan_results",
-      description:
-        "Retrieve findings from a completed ARTEX MCP task. Input: { taskId }. Returns { taskId, findings: [{ target, type, severity, evidence }] }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          taskId: { type: "string", description: "ARTEX MCP task id" },
-        },
-        required: ["taskId"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { taskId } = input as { taskId: string };
-        try {
-          const result: any = await artexMCPCall("artex_scan_results", { taskId });
-          const findings = Array.isArray(result.findings) ? result.findings : [];
-          emitScanEvent(sessionId, userId, "scan_completed", {
-            taskId,
-            findings,
-            message: `✅ Scan completed — ${findings.length} findings`,
-          });
-          return {
-            taskId,
-            findings: findings.map((f: any) => ({
-              target: f.target,
-              type: f.type,
-              severity: f.severity,
-              evidence: f.evidence,
-            })),
-          };
-        } catch (err) {
-          emitScanEvent(sessionId, userId, "scan_failed", {
-            taskId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return {
-            error:
-              "Failed to get MCP scan results " + taskId + ": " +
-              (err instanceof Error ? err.message : String(err)),
-          };
-        }
-      },
-    },
-
-    {
-      name: "artex_mcp_scan_stop",
-      description:
-        "Stop a running ARTEX MCP task. Input: { taskId }. Returns { taskId, stopped: true }.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          taskId: { type: "string", description: "ARTEX MCP task id" },
-        },
-        required: ["taskId"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { taskId } = input as { taskId: string };
-        try {
-          await artexMCPCall("artex_scan_stop", { taskId });
-          return { taskId, stopped: true };
-        } catch (err) {
-          emitScanEvent(sessionId, userId, "scan_failed", {
-            taskId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return {
-            error:
-              "Failed to stop MCP scan " + taskId + ": " +
-              (err instanceof Error ? err.message : String(err)),
-          };
-        }
-      },
-    },
-
-    {
-      name: "artex_mcp_asset_list",
-      description:
-        "List assets known to the ARTEX MCP sidecar. Input: {}. Returns { assets: [{ id, name, type, target, groupId, inScope }] }.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
-      execute: async () => {
-        try {
-          const result: any = await artexMCPCall("artex_mcp_asset_list", {});
-          return { assets: Array.isArray(result.assets) ? result.assets : [] };
-        } catch (err) {
-          return {
-            error: "Failed to list MCP assets: " + (err instanceof Error ? err.message : String(err)),
-          };
-        }
-      },
-    },
 
     // Asset write tools (MainStreet DB via existing API routes)
     {
@@ -3690,91 +3379,6 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             groupId: a.groupId,
           })),
         };
-      },
-    },
-
-    {
-      name: "artex_scan_full_lifecycle",
-      description:
-        "Start an ARTEX scan and return immediately. The scan runs autonomously in ARTEX; progress events stream to chat via SSE (scan_started / scan_progress / scan_completed / scan_failed). Input: { target, scanType }. Returns { taskId, status: 'started' }. Rejects out-of-scope targets.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          target: { type: "string", description: "Asset target to scan (must be in-scope)" },
-          scanType: { type: "string", description: "web | network | full" },
-        },
-        required: ["target", "scanType"],
-        additionalProperties: false,
-      },
-      execute: async (input: unknown) => {
-        const { target, scanType } = input as { target: string; scanType: string };
-
-        const company = await db.company.findUnique({
-          where: { userId },
-          include: {
-            assets: { where: { inScope: true } },
-            groups: true,
-          },
-        });
-        if (!company) {
-          return { error: "company_not_found" };
-        }
-
-        const inScopeAsset = company.assets.find((a) => a.target === target);
-        if (!inScopeAsset) {
-          return {
-            error: `out_of_scope_target: ${target} is not in CompanyAsset with inScope === true. Add it as an in-scope asset first.`,
-          };
-        }
-
-        const events: Array<{ type: string; message: string; timestamp: string }> = [];
-        const now = () => new Date().toISOString();
-
-        events.push({
-          type: "scan_started",
-          message: `Starting ${scanType} scan on ${target}`,
-          timestamp: now(),
-        });
-
-        const startResult: any = await artexMCPCall("artex_scan_start", {
-          target,
-          scanType,
-          goal: `scan ${target}`,
-          options: {},
-        });
-        const taskId: string = startResult.taskId || startResult.id;
-
-        events.push({
-          type: "scan_started",
-          message: `Scan started — taskId: ${taskId}`,
-          timestamp: now(),
-        });
-
-                // WP1: pin this task to the chat session for life (exactly one link).
-        try {
-          await db.agentScanLink.upsert({
-            where: { taskId },
-            update: { chatSessionId: sessionId, userId, origin: "chat", source: "mss-agent-chat" },
-            create: {
-              taskId,
-              chatSessionId: sessionId,
-              userId,
-              origin: "chat",
-              source: "mss-agent-chat",
-            },
-          });
-        } catch {
-          // best-effort binding — the scan is already running in ARTEX
-        }
-
-        emitScanEvent(sessionId, userId, "scan_started", {
-          target,
-          scanType,
-          taskId,
-          message: `🔍 Starting ${scanType} scan on ${target} (task: ${taskId}) — watch results stream here`,
-        });
-
-        return { taskId, status: "started" };
       },
     },
 
