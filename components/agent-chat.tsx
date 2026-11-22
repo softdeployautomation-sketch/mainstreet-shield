@@ -615,7 +615,7 @@ export function AgentChat() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 max-h-[60vh] overflow-y-auto p-4 space-y-4" ref={endRef}>
+      <div className="flex-1 max-h-[60vh] overflow-y-auto p-4 space-y-4 overscroll-y-contain" ref={endRef}>
         {messages.length === 0 && (
           <div className="text-xs text-fg-muted text-center mt-10">
             Ask the MSS Agent about security research, VM commands, or workflows.

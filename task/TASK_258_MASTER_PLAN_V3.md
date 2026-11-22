@@ -147,6 +147,7 @@ Admin panel continues to gate tiers, VM, destructive actions. No second policy s
 | **2B-7** | **A-1** `GET /api/mss/agent/context` (assets + workflows) injected into session | BUG-5 | Task |
 | **2B-8** | **A-5a** agent tools: `list_assets`, `list_workflows` (read-only first) | BUG-5 | Task |
 | **2B-9** | Lab Console only: “describe → agent creates workflow” + persist; remove dumb Generate | BUG-6 product — **owner: /shield only** | Task |
+| **2B-10** | Chat: full page scrolls up when agent responds — scroll only chat container | Add `overscroll-y-contain` to messages container | Task |
 
 **2B exit gates:** clean user bubbles · thinking collapsed + tools visible · assets 200 after push · agent lists real assets/workflows · workflow create-from-prompt persists on Lab Console and is editable · rename works on builder + detail · tsc/build/prisma · no secrets · RAM sample.
 
