@@ -18,4 +18,4 @@
 | 2026-11-23 | 5. Tokenise forms — AFTER | DONE | all 6 forms tokenised | tsc gate PASSED | build gate PASSED |
 | 2026-11-23 | 5. Migrate assets + shield + settings — AFTER | DONE | assets DONE | shield DONE | settings DONE | add-asset-form DONE | group-selector DONE | asset-groups-panel DONE |
 | 2026-11-23 | 6. Gates | DONE | tsc=0 | build=0 | prisma validate=valid | secrets clean | no transition-all | no onClick in server components | no console.log |
-| 2026-11-23 | 7. Commit | OPEN | local commit, message per brief §12, no push |
+| 2026-11-23 | 7. Commit | DONE | local commit 9b48ebe, no push |
