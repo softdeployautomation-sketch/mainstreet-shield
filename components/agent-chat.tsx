@@ -69,6 +69,8 @@ export function AgentChat() {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backoffRef = useRef(1000); // ms, starts at 1s
   const busGenerationRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const userScrolledRef = useRef(false);
 
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -305,6 +307,12 @@ export function AgentChat() {
     setSending(true);
     setPendingFiles([]);
 
+    // Abort any in-flight stream before starting a new one.
+    abortControllerRef.current?.abort();
+    const ctrl = new AbortController();
+    abortControllerRef.current = ctrl;
+
+      const assistantId = Math.random().toString(36).slice(2, 10);
     try {
       const res = await fetch("/api/mss/agent/chat", {
         method: "POST",
@@ -313,6 +321,7 @@ export function AgentChat() {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
+        signal: ctrl.signal,
         body: JSON.stringify({ message: text, sessionId, modelId, userImages: images, userFiles: files }),
       });
       if (!res.ok) {
@@ -328,7 +337,6 @@ export function AgentChat() {
         return;
       }
 
-      const assistantId = Math.random().toString(36).slice(2, 10);
       let accumulatedContent = "";
       let accumulatedThinking: string[] = [];
       let accumulatedTools: ToolCall[] = [];
@@ -444,7 +452,7 @@ export function AgentChat() {
           };
 
           if (eventType === "thinking") {
-            if (typeof p.reasoning === "string" && !p.end) {
+            if (typeof p.reasoning === "string") {
               const cleaned = cleanReasoning(p.reasoning);
               if (cleaned.trim()) {
                 accumulatedThinking.push(cleaned);
@@ -460,11 +468,7 @@ export function AgentChat() {
             }
           } else if (eventType === "content_start") {
             // T2: server sends content_start with { contentType: "reasoning", reasoning: "..." }
-            if (
-              p.contentType === "reasoning" &&
-              typeof p.reasoning === "string" &&
-              !p.end
-            ) {
+            if (p.contentType === "reasoning" && typeof p.reasoning === "string") {
               const cleaned = cleanReasoning(p.reasoning);
               if (cleaned.trim()) {
                 accumulatedThinking.push(cleaned);
@@ -581,7 +585,7 @@ export function AgentChat() {
           } else {
             // Catch-all: unknown event types — try to extract any reasoning text
             const maybeReasoning = (p as { reasoning?: string; text?: string; content?: string }).reasoning ?? (p as { reasoning?: string; text?: string; content?: string }).text;
-            if (typeof maybeReasoning === "string" && !p.end) {
+            if (typeof maybeReasoning === "string") {
               const cleaned = cleanReasoning(maybeReasoning);
               if (cleaned.trim()) {
                 accumulatedThinking.push(cleaned);
@@ -599,17 +603,40 @@ export function AgentChat() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Stream was stopped by the user — mark it so the UI reflects it.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: (m.content || "") + "\n\n[stopped]" }
+              : m,
+          ),
+        );
+        setError("");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to send message");
+      }
     } finally {
+      abortControllerRef.current = null;
       setSending(false);
     }
   }, [input, sending, sessionId, pendingFiles, modelId, sessionTitle]);
 
   const scrollBottom = () => {
+    // Only auto-scroll when the user hasn't manually scrolled away from the bottom.
+    if (userScrolledRef.current) return;
     if (endRef.current) {
       endRef.current.scrollTop = endRef.current.scrollHeight;
     }
   };
+
+  const handleScroll = () => {
+    if (!endRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = endRef.current;
+    // Consider "at bottom" within 100px; beyond that, stop auto-scroll.
+    userScrolledRef.current = scrollHeight - scrollTop - clientHeight > 100;
+  };
+
   useEffect(() => {
     scrollBottom();
   }, [messages]);
@@ -792,7 +819,7 @@ export function AgentChat() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 max-h-[60vh] overflow-y-auto p-4 space-y-4 overscroll-y-contain" ref={endRef}>
+      <div className="flex-1 max-h-[60vh] overflow-y-auto p-4 space-y-4 overscroll-y-contain" ref={endRef} onScroll={handleScroll}>
         {messages.length === 0 && (
           <div className="text-xs text-fg-muted text-center mt-10">
             Ask the MSS Agent about security research, VM commands, or workflows.
@@ -804,7 +831,7 @@ export function AgentChat() {
             className={`flex flex-col gap-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             {msg.role === "assistant" && msg.thinking && msg.thinking.length > 0 && (
-              <ToolCard toolName="thinking" input={null} output={msg.thinking.join("\n")} />
+              <ToolCard toolName="thinking" input={msg.thinking[0]} output={msg.thinking.join("\n")} />
             )}
             {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
               <>
@@ -868,6 +895,7 @@ export function AgentChat() {
         value={input}
         onChange={(v) => setInput(v)}
         onSend={send}
+        onStop={() => abortControllerRef.current?.abort()}
         onAttach={() => void fileInputRef.current?.click()}
         sending={sending}
         pendingFiles={pendingFiles}

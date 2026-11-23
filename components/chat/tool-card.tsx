@@ -22,8 +22,8 @@ export function ToolCard({ toolName, input, output, isError }: ToolCardProps) {
     }
   };
 
-  const argText = input ? jsonSummary(input) : "";
-  const outputText = output ? jsonSummary(output) : "";
+  const argText = input ? jsonSummary(input) : "—";
+  const outputText = output ? jsonSummary(output) : "—";
 
   return (
     <div className="rounded border border-border bg-bg-elevated my-3 overflow-hidden">

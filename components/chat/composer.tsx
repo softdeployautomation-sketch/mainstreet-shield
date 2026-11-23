@@ -9,6 +9,7 @@ interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
+  onStop: () => void;
   onAttach: () => void;
   sending: boolean;
   disabled?: boolean;
@@ -20,6 +21,7 @@ export function Composer({
   value,
   onChange,
   onSend,
+  onStop,
   onAttach,
   sending,
   disabled = false,
@@ -117,8 +119,8 @@ export function Composer({
           }}
         />
         <button
-          onClick={onSend}
-          disabled={sending || !value.trim() || disabled}
+          onClick={() => (sending ? onStop() : onSend())}
+          disabled={sending ? false : !value.trim() || disabled}
           className="rounded-md bg-brand-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60 disabled:cursor-not-allowed hover:!bg-brand-500 disabled:hover:!bg-brand-600"
         >
           {sending ? (
