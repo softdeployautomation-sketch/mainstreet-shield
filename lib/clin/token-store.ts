@@ -50,7 +50,10 @@ export async function saveClineOAuthToken(params: {
  * to expire. Returns null only when credentials are missing or the refresh
  * token was rejected (user must re-login).
  */
-export async function getValidClineOAuthToken(userId: string): Promise<string | null> {
+export async function getValidClineOAuthToken(
+  userId: string,
+  opts?: { forceRefresh?: boolean },
+): Promise<string | null> {
   const row = await db.clineAuthSession.findUnique({
     where: { userId },
     select: {
@@ -76,7 +79,8 @@ export async function getValidClineOAuthToken(userId: string): Promise<string | 
   // calling getValidClineCredentials on every turn, which can clear a valid
   // session when the SDK returns null for a token that doesn't need refresh.
   const now = Date.now();
-  const needsRefresh = expires && expires <= now + REFRESH_BUFFER_MS;
+  const needsRefresh =
+    opts?.forceRefresh === true || (expires && expires <= now + REFRESH_BUFFER_MS);
 
   if (!needsRefresh) {
     return access;

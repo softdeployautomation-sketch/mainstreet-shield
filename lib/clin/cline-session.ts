@@ -15,7 +15,7 @@ import {
 } from "@cline/sdk";
 import type { AgentTool } from "@cline/shared";
 
-import { getClineOAuthToken, clearClineAuthSession } from "@/lib/clin/token-store";
+import { getClineOAuthToken, getValidClineOAuthToken, clearClineAuthSession } from "@/lib/clin/token-store";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
@@ -3652,9 +3652,65 @@ export async function startClineSession(
     resultText = startResult.result?.text ?? "";
   } catch (err) {
     if (isClineAuthError(err)) {
-      // Don't clear credentials here — that destroys the user's stored token
-      // and creates an infinite re-auth loop. Just surface the error so the
-      // frontend can offer a proper re-auth path via Settings.
+      // Force-refresh the OAuth token — it may have expired mid-session
+      // (e.g. during a long scan turn). Don't clear credentials; that causes
+      // an infinite re-auth loop. Just retry once with a fresh token.
+      const refreshed = await getValidClineOAuthToken(input.userId, {
+        forceRefresh: true,
+      });
+      if (refreshed) {
+        const retryCreds = await resolveClineCredentials(input.userId);
+        if (retryCreds) {
+          try {
+            const retryResult = await core.start({
+              config: {
+                sessionId,
+                providerId: retryCreds.providerId,
+                modelId: input.modelId ?? retryCreds.modelId ?? "anthropic/claude-sonnet-4-20250514",
+                apiKey: retryCreds.apiKey,
+                baseUrl: retryCreds.baseUrl,
+                systemPrompt: await getMssSystemPromptForUser(input.userId),
+                cwd,
+                workspaceRoot: cwd,
+                enableTools: true,
+                extraTools: mssTools(input.userId, sessionId),
+                enableSpawnAgent: false,
+                enableAgentTeams: false,
+              },
+              prompt: input.prompt,
+              ...(initialMessages && initialMessages.length > 0
+                ? { initialMessages }
+                : {}),
+              userImages: input.userImages,
+              userFiles: input.userFiles,
+              interactive: true,
+            });
+            resultText = retryResult.result?.text ?? "";
+          } catch (retryErr) {
+            if (isClineAuthError(retryErr)) {
+              return {
+                sessionId,
+                response: "",
+                thinking: [],
+                status: "failed",
+                error:
+                  retryErr instanceof Error ? retryErr.message : "cline_auth_error",
+                clineReady: false,
+              };
+            }
+            return {
+              sessionId,
+              response: "",
+              thinking: [],
+              status: "failed",
+              error:
+                retryErr instanceof Error ? retryErr.message : String(retryErr),
+              clineReady: true,
+            };
+          }
+        }
+      }
+      // Fall through to the original auth error return below
       return {
         sessionId,
         response: "",
@@ -3780,8 +3836,58 @@ export async function sendClineMessage(
     });
   } catch (err) {
     if (isClineAuthError(err)) {
-      // Don't clear credentials here — that destroys the user's stored token
-      // and creates an infinite re-auth loop. Just surface the error.
+      // Force-refresh the OAuth token — it may have expired mid-session
+      // (e.g. during a long scan turn). Don't clear credentials; that causes
+      // an infinite re-auth loop. Retry once with a fresh token via a resumed
+      // startClineSession so ClineCore gets the new API key.
+      const refreshed = await getValidClineOAuthToken(input.userId, {
+        forceRefresh: true,
+      });
+      if (refreshed) {
+        try {
+          const resumed = await startClineSession(
+            {
+              userId: input.userId,
+              sessionId: input.sessionId,
+              prompt: input.prompt,
+              userImages: input.userImages,
+              userFiles: input.userFiles,
+              resume: true,
+            },
+            onEvent,
+          );
+          return {
+            sessionId: resumed.sessionId || input.sessionId,
+            response: resumed.response,
+            thinking: resumed.thinking,
+            status: resumed.status,
+            error: resumed.error,
+            clineReady: resumed.clineReady,
+          };
+        } catch (resumeErr) {
+          if (isClineAuthError(resumeErr)) {
+            return {
+              sessionId: input.sessionId,
+              response: "",
+              thinking: [],
+              status: "failed",
+              error:
+                resumeErr instanceof Error ? resumeErr.message : "cline_auth_error",
+              clineReady: false,
+            };
+          }
+          return {
+            sessionId: input.sessionId,
+            response: "",
+            thinking: [],
+            status: "failed",
+            error:
+              resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
+            clineReady: true,
+          };
+        }
+      }
+      // Fall through to the original auth error return below
       return {
         sessionId: input.sessionId,
         response: "",
