@@ -1,6 +1,7 @@
 # TASK_258 — Master Plan v4: UI Reconstruction + Agent UX
 
-**Status:** APPROVED — owner approval 2026-11-23. WP6.0 task brief issued.
+**Status:** SUPERSEDED — WP6.0 shipped (`da7fb5b`). Planning authority is now `TASK_258_MASTER_PLAN_V6_PROMPTS_MEMORY.md`; WP6.8 chat/menus detail lives in `TASK_258_WP6_8_CHAT_MENUS.md`. Keep this file only as design-system history.
+**Verification:** `TASK_258_SVE_VERIFICATION_CHECKLIST.md` §1 + §9 (chat/shell).
 **Date:** 2026-11-23
 **Supersedes (UI/agent sections only):** `TASK_258_MASTER_PLAN_V3.md`
 **Base:** `main` @ `5155ac4` (reports crash + CSV/DOC export shipped)

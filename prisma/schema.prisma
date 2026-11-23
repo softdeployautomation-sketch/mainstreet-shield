@@ -466,3 +466,52 @@ model InfraActionLog {
   detail    String?
   createdAt DateTime @default(now())
 }
+
+// ---------------------------------------------------------------------------
+// Graph memory — Postgres-native node/edge/review queue (D18–D24)
+// ---------------------------------------------------------------------------
+model MemoryNode {
+  id          String   @id @default(cuid())
+  key         String   // unique slug within tenant
+  label       String
+  type        String   // "ip" | "domain" | "port" | "service" | "vuln" | "finding" | "tactic" | "technique"
+  summary     String?
+  confidence  Float    @default(0.5)
+  authority   String   @default("agent") // "agent" | "human" | "sanitized_global"
+  source      String?
+  companyId   String?  // NULL = global sanitized playbook
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, companyId])
+  @@index([type])
+  @@index([companyId])
+}
+
+model MemoryEdge {
+  id          String   @id @default(cuid())
+  fromKey     String   // references MemoryNode.key
+  toKey       String   // references MemoryNode.key
+  type        String   // "leads_to" | "exposes" | "mitigates" | "related_to" | "evidence_for"
+  confidence  Float    @default(0.5)
+  status      String   @default("hypothesis") // "hypothesis" | "confirmed" | "rejected"
+  evidence    String?
+  companyId   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([fromKey])
+  @@index([toKey])
+  @@index([companyId])
+}
+
+model MemoryReview {
+  id          String   @id @default(cuid())
+  edgeId      String   @unique
+  action      String   // "confirm" | "reject"
+  decidedById String?
+  decidedAt   DateTime?
+  rationale   String?
+  createdAt   DateTime @default(now())
+}
