@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ChatMarkdown } from "./chat/markdown";
+import { ToolCard } from "./chat/tool-card";
+import { ScanEventCard } from "./chat/scan-event-card";
+import { SessionMenu } from "./chat/session-menu";
+import { Composer } from "./chat/composer";
+
 interface ToolCall {
   toolName: string;
   input?: unknown;
@@ -776,49 +782,13 @@ export function AgentChat() {
 
       {/* Session switcher panel (A-0d) */}
       {sessionsPanelOpen && (
-        <div className="absolute z-20 mt-1 w-64 rounded border border-border bg-bg-elevated shadow-lg">
-          <div className="border-b border-border p-2 text-xs font-mono font-bold text-fg">
-            Previous chats
-          </div>
-          <div className="max-h-60 overflow-y-auto">
-            {sessionsError && (
-              <div className="px-3 py-2 text-xs text-rose-400">{sessionsError}</div>
-            )}
-            {sessions.length === 0 && (
-              <div className="px-3 py-2 text-xs text-fg-muted italic">
-                No previous chats yet.
-              </div>
-            )}
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between px-3 py-2 border-b border-border/50"
-              >
-                <button
-                  onClick={() => void switchSession(s.id)}
-                  className="flex-1 text-left text-xs text-fg hover:bg-bg-elevated/50 rounded-l"
-                  disabled={sending || s.id === sessionId}
-                >
-                  <div className="font-mono truncate">{s.title ?? s.id.slice(-8)}</div>
-                  <div className="text-[10px] text-fg-muted truncate">
-                    {new Date(s.startedAt).toLocaleString()} ·
-                    {s.status}
-                  </div>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteSession(s.id);
-                  }}
-                  className="px-1.5 py-1 text-xs text-fg-muted hover:text-rose-400 hover:bg-rose-900/20 rounded-r"
-                  title="Delete conversation"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <SessionMenu
+          sessions={sessions}
+          activeSessionId={sessionId}
+          onSelect={switchSession}
+          onNewChat={newChat}
+          onClose={() => setSessionsPanelOpen(false)}
+        />
       )}
 
       {/* Messages */}
@@ -834,96 +804,23 @@ export function AgentChat() {
             className={`flex flex-col gap-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             {msg.role === "assistant" && msg.thinking && msg.thinking.length > 0 && (
-              <details className="ml-0 flex flex-col gap-1 max-w-[80%]">
-                <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 rounded border border-zinc-800/50 bg-zinc-900/40 text-[10px] font-mono text-emerald-400 hover:text-emerald-300">
-                  <span className="w-1 h-1 rounded-full bg-emerald-500" />
-                  <span className="uppercase tracking-wider">Model thinking</span>
-                </summary>
-                <div className="rounded border border-zinc-800/50 bg-zinc-900/40 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto">
-                  {msg.thinking.map((t, i) => (
-                    <div key={i} className="break-words whitespace-pre-wrap mb-1">
-                      {t}
-                    </div>
-                  ))}
-                </div>
-              </details>
+              <ToolCard toolName="thinking" input={null} output={msg.thinking.join("\n")} />
             )}
             {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
-              <details className="ml-0 flex flex-col gap-1 max-w-[80%]">
-                <summary className="flex items-center gap-1 cursor-pointer list-none px-2 py-1 rounded border border-border bg-bg-elevated/50 text-[10px] font-mono text-zinc-400 hover:text-fg">
-                  <span className="w-1 h-1 rounded-full bg-zinc-500" />
-                  <span className="uppercase tracking-wider">Tools ({msg.tools.length})</span>
-                </summary>
-                <div className="rounded border border-border bg-bg-elevated/50 p-2 text-xs text-zinc-300 font-mono leading-relaxed max-h-40 overflow-y-auto space-y-1">
-                  {msg.tools.map((tool, i) => {
-                    // T-3.5: render artex_scan_full_lifecycle events as individual scan chips
-                    if (tool.toolName === "artex_scan_full_lifecycle" && tool.output && typeof tool.output === "object" && Array.isArray((tool.output as any).events)) {
-                      const events = (tool.output as any).events;
-                      return (
-                        <div key={i} className="break-words whitespace-pre-wrap mb-0.5">
-                          <span className="text-brand-500">🔧 {tool.toolName}</span>
-                          {events.map((ev: any, j: number) => {
-                            const evIcon = ev.type === "scan_started" ? "🔍" : ev.type === "scan_progress" ? "⏳" : ev.type === "scan_completed" ? "✅" : "❌";
-                            const evColor = ev.type === "scan_failed" ? "text-rose-400" : ev.type === "scan_completed" ? "text-emerald-400" : "text-zinc-400";
-                            return (
-                              <div key={j} className="ml-2 break-words whitespace-pre-wrap mb-0.5">
-                                <span className={evColor}>{evIcon} {ev.message}</span>
-                              </div>
-                            );
-                          })}
-                          {(() => { const out = tool.output as any; return out.findings && (
-                            <div className="ml-2 break-words whitespace-pre-wrap mb-0.5 text-zinc-300">
-                              📊 {out.findings.length} findings · new assets: {out.newAssets?.length ?? 0} · report: {out.reportDocumentId ?? "none"}
-                            </div>
-                          ); })()}
-                        </div>
-                      );
-                    }
-                    const icon =tool.isError ? "✗" : tool.output!== undefined ? "✓" : "🔧";
-                    const color = tool.isError ? "text-rose-400" : tool.output !== undefined ? "text-emerald-400" : "text-zinc-400";
-                    return (
-                      <div key={i} className="break-words whitespace-pre-wrap mb-0.5">
-                        <span className={color}>{icon} {tool.toolName}</span>
-                        {tool.isError && tool.output !== undefined && (
-                          <span className="text-rose-300 ml-1">error: {String(tool.output).slice(0, 200)}</span>
-                        )}
-                        {!tool.isError && tool.output !== undefined && (
-                          <span className="text-zinc-300 ml-1">→ {String(tool.output).slice(0, 300)}</span>
-                        )}
-                        {!tool.isError && tool.output === undefined && tool.input !== undefined && (
-                          <span className="text-zinc-400 ml-1">({String(tool.input).slice(0, 300)})</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {msg.scanEvents && msg.scanEvents.length > 0 && (
-                    <div className="break-words whitespace-pre-wrap mb-0.5">
-                      <span className="text-brand-500">🔧 ARTEX MCP scan events</span>
-                      {msg.scanEvents.map((ev, j) => {
-                        const evIcon =
-                          ev.type === "scan_started"
-                            ? "🔍"
-                            : ev.type === "scan_progress"
-                            ? "⏳"
-                            : ev.type === "scan_completed"
-                            ? "✅"
-                            : "❌";
-                        const evColor =
-                          ev.type === "scan_failed"
-                            ? "text-rose-400"
-                            : ev.type === "scan_completed"
-                            ? "text-emerald-400"
-                            : "text-zinc-400";
-                        return (
-                          <div key={j} className="ml-2 break-words whitespace-pre-wrap mb-0.5">
-                            <span className={evColor}>{evIcon} {ev.message}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </details>
+              <>
+                {msg.tools.map((tool, i) => (
+                  <ToolCard
+                    key={i}
+                    toolName={tool.toolName}
+                    input={tool.input}
+                    output={tool.output}
+                    isError={tool.isError}
+                  />
+                ))}
+                {msg.scanEvents && msg.scanEvents.length > 0 && (
+                  <ScanEventCard events={msg.scanEvents} />
+                )}
+              </>
             )}
             <div
               className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${
@@ -932,7 +829,7 @@ export function AgentChat() {
                   : "bg-bg-elevated border border-border text-fg"
               }`}
             >
-              {msg.content}
+              {msg.content ? <ChatMarkdown content={msg.content} /> : null}
             </div>
           </div>
         ))}
@@ -967,33 +864,15 @@ export function AgentChat() {
       )}
 
       {/* Input row */}
-      <div className="border-t border-border p-3 bg-bg-elevated">
-        <div className="flex items-end gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-            placeholder="Ask the MSS Agent…"
-            disabled={sending}
-            className="flex-1 rounded border border-border bg-white px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border disabled:opacity-60"
-          />
-          <button
-            onClick={() => void (fileInputRef.current?.click())}
-            disabled={sending}
-            className="rounded border border-border bg-white px-2 py-2 text-xs font-mono text-fg hover:bg-bg-elevated disabled:opacity-60"
-            title="Attach files / images"
-          >
-            + Attach
-          </button>
-          <button
-            onClick={send}
-            disabled={sending || !input.trim()}
-            className="rounded bg-brand-600 px-3 py-2 text-xs font-mono font-bold text-white disabled:opacity-60 disabled:cursor-not-allowed hover:!bg-brand-500 disabled:hover:!bg-brand-600"
-          >
-            {sending ? "Sending…" : "Send"}
-          </button>
-        </div>
-      </div>
+      <Composer
+        value={input}
+        onChange={(v) => setInput(v)}
+        onSend={send}
+        onAttach={() => void fileInputRef.current?.click()}
+        sending={sending}
+        pendingFiles={pendingFiles}
+        onRemoveFile={removeFile}
+      />
     </div>
   );
 }
