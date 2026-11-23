@@ -334,7 +334,6 @@ Rollback:
 | **Owner actions complete** | — | SVE | 2026-11-23 | **DONE** | Sudoers installed on VPS 207.244.224.57 (`/etc/sudoers.d/mainstreet-shield-admin`, visudo OK). VM disposability confirmed (`shield-lab`: destroy on start, undefine+remove-storage on stop; intentionally disposable). `MAINSTREET_SERVICE_TOKEN` rotated on VPS — old token removed from `/opt/mainstreet-shield/.env` and `/opt/spaceworker/.env` (all three token variables). Both services restarted and active. |
 | **1C SpaceWorker MSS admin tabs** | `2b2c681` | SVE | 2026-11-23 | **PASS — DEPLOYED** | tsc 0 · secret scan clean · no transition-all in batch files · no DSIH in batch files · hardcoded token removed from admin-panel.tsx. `MSS_SERVICE_TOKEN` added to VPS `/opt/spaceworker/.env` (was missing). Service restarted at 13:45 CET. Prompts/Infrastructure sub-tabs load from MSS backend via proxy routes. Fixes usersByTier array render. Deployed and verified. Next: WP6.8 corrective. |
 | 2 memory | `afb05d8` | SVE | 2026-11-23 | **PASS — PUSHED** | Evidence-gated Postgres graph (MemoryNode/MemoryEdge/MemoryReview) per D18–D24. Schema + API only, no db push. Gates: prisma valid · tsc 0 · build 0. Pushed to origin/main as `afb05d8`. Awaiting owner build trigger/deploy. |
-| 3 workflows | | SVE | | | |
 | 4 notifications | | SVE | | | |
 | 5 assets/findings | | SVE | | | |
 | 6 brain/chat | | SVE | | | |
@@ -350,3 +349,4 @@ P2: <list>
 Gates: prisma <ok> · tsc <ok> · lint <ok> · build <ok> · tests <ok>
 Next: await owner GO for push / db push / deploy
 ```
+| 3 workflows | | SVE | | SCOPED | Scheduled triggers (`WorkflowTrigger`), run sessions (`WorkflowRun`), step tracking (`WorkflowRunStep`), API routes, agent tools, asset status/priority/test-queue. Chat session per `WorkflowRun`; fallback new session. Schema + API only, no db push. Awaiting task agent. |\n

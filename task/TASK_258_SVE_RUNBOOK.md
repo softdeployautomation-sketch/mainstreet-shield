@@ -229,6 +229,8 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 5. **Cline auth mid-session fix — commit `6b679b3`** — PUSHED to origin/main. Force-refreshes OAuth token on 401 during `core.start()`/`core.send()` and retries once. Prevents "Unauthorized ... re-authenticate" mid-scan. tsc 0 · build success · 0 console.log/transition-all/DSIH. Awaiting owner build trigger/deploy.
 6. **Batch 2 memory — PUSHED — `afb05d8`.** Evidence-gated Postgres graph (MemoryNode/MemoryEdge/MemoryReview) per D18–D24. Schema + API only, no db push. Committed locally then pushed to origin/main. Gates: prisma valid · tsc 0 · build 0. Awaiting owner build trigger/deploy.
 
+7. **Batch 3 workflows — SCOPED.** Prompt at `task/TASK_258_SVE_BATCH3_WORKFLOWS_PROMPT.md`. Scheduled triggers (`WorkflowTrigger`), run sessions (`WorkflowRun`), step tracking (`WorkflowRunStep`), API routes, agent tools, asset status/priority/test-queue. Chat session per `WorkflowRun`; fallback new session. Schema + API only, no db push. Awaiting task agent.
+
 
 ---
 
