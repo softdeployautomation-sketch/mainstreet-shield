@@ -17,7 +17,7 @@
 | 2026-11-23 | Bug B BEFORE | DONE | Plan: NEW `app/api/mss/agent/report-documents/[id]/export/route.ts` (`?format=csv|doc`); add download links to detail page and list page. |
 | 2026-11-23 | Bug B AFTER | DONE | NEW export route (auth + ownership identical to `[id]/route.ts`); CSV (BOM + RFC-4180 quoting) and DOC (Word HTML) branches; detail page "Download CSV/DOC" + "Back to assets"; list rows CSV/DOC links. |
 | 2026-11-23 | Gates | PASS | `npx tsc --noEmit` exit 0 · `npm run build` exit 0 (export route in `.next`) · secrets scan clean. |
-| 2026-11-23 | Commit (local only) | PENDING | No push. Wait for owner GO before deploy. |
+| 2026-11-23 | Commit (local only) | DONE | `7fa5891` on `main`. No push. Wait for owner GO before deploy. |
 
 ---
 
