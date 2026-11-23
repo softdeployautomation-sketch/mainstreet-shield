@@ -81,12 +81,9 @@ export async function POST(req: Request) {
     }
 
     // Determine companyId
-    let workflowCompanyId: string | null = null;
+    let workflowCompanyId: string = session.userId; // default to agent's own company
     if (session.role === "admin") {
-      workflowCompanyId = companyId || null;
-    } else {
-      // Agent creates workflow for their own company
-      workflowCompanyId = session.userId;
+      workflowCompanyId = companyId || session.userId;
     }
 
     // Create workflow (starts as "draft" status, triggerCount defaults to 0)

@@ -63,7 +63,7 @@ export async function GET(req: Request) {
 
     // Get test queue items - using db mock query for now
     // In production, this would query a proper test_queue table
-    const testQueue = [];
+    const testQueue: any[] = [];
 
     return NextResponse.json(testQueue);
   } catch (error) {

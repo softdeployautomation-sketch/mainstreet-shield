@@ -53,7 +53,7 @@ export async function POST(
     });
 
     // Add an initial agent_prompt step to the run
-    await db.workflowStep.create({
+    await db.workflowRunStep.create({
       data: {
         runId: run.id,
         name: "agent_prompt",
