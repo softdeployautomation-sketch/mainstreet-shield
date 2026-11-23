@@ -6,36 +6,33 @@ import { Button } from "@/components/ui/button";
 
 const STORAGE_KEY = "ms-theme";
 
+function applyTheme(theme: "dark" | "light") {
+  const root = document.documentElement;
+  if (theme === "dark") root.classList.add("dark");
+  else root.classList.remove("dark");
+}
+
 export function ThemeToggle() {
   const [theme, setTheme] = React.useState<"dark" | "light">("dark");
-  const root = document.documentElement;
 
   React.useEffect(() => {
-    let stored: string | null = null;
+    let next: "dark" | "light" = document.documentElement.classList.contains("dark")
+      ? "dark"
+      : "light";
     try {
-      stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored === "dark" || stored === "light") next = stored;
     } catch {
       /* noop */
     }
-    const param = new URLSearchParams(window.location.search).get("theme");
-    let next: "dark" | "light" = "dark";
-    if (param === "dark" || param === "light") {
-      next = param;
-    } else if (stored === "dark" || stored === "light") {
-      next = stored;
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      next = "dark";
-    }
     setTheme(next);
-    if (next === "dark") root.classList.add("dark");
-    else root.classList.remove("dark");
+    applyTheme(next);
   }, []);
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    if (next === "dark") root.classList.add("dark");
-    else root.classList.remove("dark");
+    applyTheme(next);
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {

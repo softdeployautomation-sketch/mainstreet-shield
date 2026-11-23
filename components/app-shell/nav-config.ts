@@ -3,7 +3,6 @@ import {
   Boxes,
   ShieldAlert,
   FileText,
-  Bot,
   MonitorPlay,
   Settings,
 } from "lucide-react";
@@ -14,7 +13,7 @@ export interface NavItem {
   icon: React.ElementType;
   disabled?: boolean;
   badge?: "Soon" | string;
-  minTier?: "5" | "3";
+  minTier?: "3" | "5";
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -30,13 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/reports", label: "Reports", icon: FileText },
   {
     href: "/shield",
-    label: "Agent",
-    icon: Bot,
-    minTier: "5",
-  },
-  {
-    href: "/shield",
-    label: "Lab",
+    label: "Lab Console",
     icon: MonitorPlay,
     minTier: "5",
   },

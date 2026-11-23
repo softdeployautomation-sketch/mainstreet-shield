@@ -3,24 +3,18 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  X,
-  LayoutDashboard,
-  LogOut,
-  Lock,
-  ShieldHalf,
-} from "lucide-react";
+import { X, LogOut, Lock, ShieldHalf } from "lucide-react";
 import { NAV_ITEMS } from "./nav-config";
 
 interface MobileNavProps {
   user: { email: string; name: string | null; tier: string; role: string } | null;
+  open: boolean;
   onClose: () => void;
 }
 
-export function MobileNav({ user, onClose }: MobileNavProps) {
-  const [open, setOpen] = React.useState(false);
+export function MobileNav({ user, open, onClose }: MobileNavProps) {
   const pathname = usePathname();
-  const panelRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLElement>(null);
   const userTier = user?.tier ?? "";
 
   const isActive = (item: (typeof NAV_ITEMS)[number]) => {
@@ -35,17 +29,14 @@ export function MobileNav({ user, onClose }: MobileNavProps) {
   };
 
   React.useEffect(() => {
-    if (panelRef.current) {
-      panelRef.current.focus();
-    }
+    if (!open) return;
+    panelRef.current?.focus();
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, []);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -57,18 +48,20 @@ export function MobileNav({ user, onClose }: MobileNavProps) {
         aria-hidden="true"
       />
       <aside
+        id="mobile-nav"
         ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="MainStreet Shield navigation"
-        className="fixed left-0 top-0 bottom-0 w-64 border-r border-border bg-bg z-50 transform transition-transform duration-300 ease-out translate-x-0 md:hidden"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed left-0 top-0 bottom-0 w-64 border-r border-border bg-bg z-50 md:hidden"
       >
         <div className="flex h-full flex-col">
-          <div className="p-4 border-b border-border">
+          <div className="p-4 border-b border-border flex items-center justify-between">
             <Link
               href="/dashboard"
-              className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400"
+              onClick={onClose}
+              className="flex items-center gap-2 font-mono font-bold text-brand-500"
             >
               <ShieldHalf className="w-5 h-5" aria-hidden="true" />
               <span className="text-xs">MainStreet Shield</span>
@@ -86,14 +79,29 @@ export function MobileNav({ user, onClose }: MobileNavProps) {
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const active = isActive(item);
-              const show = hasMinTier(item);
+              const locked = !hasMinTier(item);
+              const blocked = Boolean(item.disabled) || locked;
 
               return (
                 <Link
-                  key={item.href}
+                  key={item.href + item.label}
                   href={item.href}
-                  onClick={onClose}
-                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-mono transition-opacity duration-150 ${active ? "bg-brand-600/10 text-brand-600 dark:bg-brand-600/20 dark:text-brand-400" : show ? "text-fg-muted hover:text-fg hover:bg-surface-hover" : "text-fg-muted/50"}`}
+                  onClick={(e) => {
+                    if (blocked) {
+                      e.preventDefault();
+                      return;
+                    }
+                    onClose();
+                  }}
+                  aria-current={active ? "page" : undefined}
+                  aria-disabled={blocked || undefined}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-mono transition-opacity duration-150 ${
+                    active
+                      ? "bg-brand-500/10 text-brand-500 border border-brand-500/20"
+                      : blocked
+                        ? "text-fg-muted/50 cursor-not-allowed"
+                        : "text-fg-muted hover:text-fg hover:bg-surface-hover"
+                  }`}
                 >
                   <Icon className="w-4 h-4" aria-hidden="true" />
                   {item.label}
@@ -102,8 +110,8 @@ export function MobileNav({ user, onClose }: MobileNavProps) {
                       {item.badge}
                     </span>
                   )}
-                  {item.minTier && !hasMinTier(item) && (
-                    <span className="ml-auto w-5 h-5" aria-label="locked">
+                  {locked && (
+                    <span className="ml-auto" aria-label="Locked">
                       <Lock className="w-3 h-3" aria-hidden="true" />
                     </span>
                   )}
@@ -112,12 +120,18 @@ export function MobileNav({ user, onClose }: MobileNavProps) {
             })}
           </nav>
           <div className="p-3 border-t border-border">
+            {user?.email && (
+              <div className="px-3 pb-2 text-xs text-fg-muted truncate">
+                {user.email}
+              </div>
+            )}
             <form action="/api/auth/logout" method="post">
               <button
                 type="submit"
                 className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-mono text-fg-muted hover:text-fg hover:bg-surface-hover transition-opacity duration-150"
               >
-                <LogOut className="w-4 h-4" aria-hidden="true" />Sign out
+                <LogOut className="w-4 h-4" aria-hidden="true" />
+                Sign out
               </button>
             </form>
           </div>
