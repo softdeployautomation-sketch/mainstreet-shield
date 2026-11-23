@@ -1,14 +1,23 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell/app-shell";
+import { getSession } from "@/lib/auth";
+import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
   title: "Lab Console — MainStreet Shield",
 };
 
-export default function ShieldLayout({
+export default async function ShieldLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AppShell>{children}</AppShell>;
+  const session = await getSession();
+  const user = session
+    ? await db.user.findUnique({
+        where: { id: session.userId },
+        select: { email: true, name: true, tier: true, role: true },
+      })
+    : null;
+  return <AppShell user={user}>{children}</AppShell>;
 }
