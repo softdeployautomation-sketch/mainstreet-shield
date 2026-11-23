@@ -425,3 +425,44 @@ model AgentScanEvent {
 
   @@index([taskId, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// PromptTemplate — versioned, admin-activated agent instruction text.
+// Only policy text is stored here; tool docs + safety invariants stay in code.
+// Additive: no FK to User/Company.
+// ---------------------------------------------------------------------------
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  key         String   // "mss.policy"
+  scope       String   @default("global") // global | company
+  scopeKey    String   @default("global") // "global" or companyId (NULL-safe uniqueness)
+  companyId   String?
+  name        String
+  description String?
+  body        String   @db.Text
+  version     Int
+  status      String   @default("draft") // draft | active | archived
+  source      String   @default("human") // human | agent
+  rationale   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  activatedAt DateTime?
+  archivedAt  DateTime?
+
+  @@unique([key, scopeKey, version])
+  @@index([key, status])
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// InfraActionLog — audit log for admin infrastructure actions (Task B).
+// No FKs; append-only.
+// ---------------------------------------------------------------------------
+model InfraActionLog {
+  id        String   @id @default(cuid())
+  action    String
+  actor     String
+  ok        Boolean
+  detail    String?
+  createdAt DateTime @default(now())
+}
