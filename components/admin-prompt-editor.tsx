@@ -156,7 +156,7 @@ export function AdminPromptEditor() {
     if (!confirm) return;
     const { type, targetId } = confirm;
     try {
-      if (type === "activate" || type === "reject") {
+      if (type === "activate" || type === "reject" || type === "revert") {
         const res = await fetch(`/api/admin/prompts/${targetId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -352,15 +352,64 @@ export function AdminPromptEditor() {
                     Reject
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => beginConfirm("revert", currentDraft.id)}
-                  className="px-3"
-                  disabled={!!confirm}
-                >
-                  Revert to active
-                </Button>
+                {confirm?.type === "revert" && confirm.targetId === currentDraft.id ? (
+                  <>
+                    <Button
+                      variant="brand"
+                      size="sm"
+                      onClick={executeConfirm}
+                      className="px-3"
+                    >
+                      Confirm revert
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={cancelConfirm} className="px-3">
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => beginConfirm("revert", currentDraft.id)}
+                    className="px-3"
+                    disabled={!!confirm}
+                  >
+                    Revert to active
+                  </Button>
+                )}
+              </section>
+            )}
+
+            {entry.versions.length > 0 && (
+              <section className="space-y-3 pt-4 border-t border-border">
+                <h3 className="text-xs font-mono text-fg-muted uppercase tracking-wider">
+                  Archived versions
+                </h3>
+                <div className="space-y-2">
+                  {entry.versions.map((v) => (
+                    <div
+                      key={v.id}
+                      className="flex items-center justify-between px-3 py-2 rounded border border-border bg-surface text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">v{v.version}</span>
+                        {v.activatedAt && (
+                          <span className="text-xs text-fg-muted">
+                            activated {new Date(v.activatedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => beginConfirm("revert", v.id)}
+                        disabled={!!confirm}
+                      >
+                        Revert
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               </section>
             )}
 

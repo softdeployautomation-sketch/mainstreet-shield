@@ -34,4 +34,5 @@ Whole batch then STOP for SVE verification. No git push, no deploy, no prisma db
 | 2026-11-23 | 4B. scripts/setup-mss-admin-sudoers.sh — BEFORE | DONE | new file, not executed |
 | 2026-11-23 | 4B. scripts/setup-mss-admin-sudoers.sh — AFTER | DONE | not executed; narrow Cmnd_Alias for systemctl start/stop/restart mainstreet-shield-vm.service only |
 | 2026-11-23 | Gates: npx prisma validate / generate / tsc --noEmit / npm run build | DONE | prisma validate ✓; prisma generate ✓; tsc --noEmit exit 0 (clean); npm run build ✓ compiled successfully |
-| 2026-11-23 | Commit locally (one commit per logical change) | IN PROGRESS | |
+| 2026-11-23 | P1 fixes (SVE): prompt text lost, dead code, revert, scope collision, chat dies, VM auth, freeze/import | DONE | added closing line to SAFETY_INVARIANTS; deleted dead MSS_* consts from cline-session.ts; implemented revert action in API + editor confirm UI + Cancel paths; grouped prompts by key+scope with scope/company in payload; added try/catch DB fallback to resolvePrompt; sudo -n for systemctl; freeze creates killSwitch if missing; removed unused ALLOWED_UNIT import; trailing newlines; MemoryCurrent infinity -> null; 401 for unauthenticated |
+| 2026-11-23 | Commit SVE fixes locally | IN PROGRESS | |

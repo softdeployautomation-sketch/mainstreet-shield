@@ -27,7 +27,10 @@ export async function requireAdmin(req: Request): Promise<AdminActor | NextRespo
     return { userId: null, actor: "service" };
   }
   const session = await getSession();
-  if (!session || session.role !== "admin") {
+  if (!session) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+  if (session.role !== "admin") {
     return NextResponse.json({ error: "admin required" }, { status: 403 });
   }
   return { userId: session.userId, actor: session.email };

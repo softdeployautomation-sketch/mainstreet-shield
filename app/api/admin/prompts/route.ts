@@ -7,6 +7,9 @@ import { PROMPT_KEYS } from "@/lib/prompts/registry";
 
 type PromptEntry = {
   key: string;
+  scope: string;
+  scopeKey: string;
+  companyId: string | null;
   name: string;
   description: string | null;
   active: {
@@ -23,36 +26,45 @@ type PromptEntry = {
     rationale: string | null;
     createdAt: Date;
     body: string;
+    scope: string;
+    scopeKey: string;
+    companyId: string | null;
   }>;
   versions: Array<{
     id: string;
     version: number;
     activatedAt: Date | null;
+    scope: string;
+    scopeKey: string;
   }>;
 };
 
-// GET /api/admin/prompts — all templates grouped by key (admin only)
+// GET /api/admin/prompts — all templates grouped by key+scope (admin only)
 export async function GET(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof NextResponse) return auth;
 
   const rows = await db.promptTemplate.findMany({
-    orderBy: [{ key: "asc" }, { scope: "asc" }, { version: "desc" }],
+    orderBy: [{ key: "asc" }, { scope: "asc" }, { scopeKey: "asc" }, { version: "desc" }],
   });
 
-  const byKey = new Map<string, PromptEntry>();
+  const byKeyScope = new Map<string, PromptEntry>();
   for (const row of rows) {
-    let entry = byKey.get(row.key);
+    const entryKey = `${row.key}|${row.scopeKey}`;
+    let entry = byKeyScope.get(entryKey);
     if (!entry) {
       entry = {
         key: row.key,
+        scope: row.scope,
+        scopeKey: row.scopeKey,
+        companyId: row.companyId,
         name: row.name,
         description: row.description,
         active: null,
         drafts: [],
         versions: [],
       };
-      byKey.set(row.key, entry);
+      byKeyScope.set(entryKey, entry);
     }
     if (row.status === "active") {
       entry.active = {
@@ -70,17 +82,22 @@ export async function GET(req: Request) {
         rationale: row.rationale,
         createdAt: row.createdAt,
         body: row.body,
+        scope: row.scope,
+        scopeKey: row.scopeKey,
+        companyId: row.companyId,
       });
     } else if (row.status === "archived") {
       entry.versions.push({
         id: row.id,
         version: row.version,
         activatedAt: row.activatedAt,
+        scope: row.scope,
+        scopeKey: row.scopeKey,
       });
     }
   }
 
-  return NextResponse.json({ prompts: Array.from(byKey.values()) });
+  return NextResponse.json({ prompts: Array.from(byKeyScope.values()) });
 }
 
 // POST /api/admin/prompts — create a DRAFT only (never active)

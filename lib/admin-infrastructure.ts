@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 // The Next.js app / its own service is deliberately NOT in this list.
 export const ALLOWED_UNIT = "mainstreet-shield-vm.service";
 
-const SYSTEMCTL = "/usr/bin/systemctl";
+const SYSTEMCTL = "/usr/bin/sudo";
+const SYSTEMCTL_ARGS = ["-n", "/usr/bin/systemctl"];
 
 const SHOW_TIMEOUT_MS = 10000;
 
@@ -60,7 +61,7 @@ export async function getServiceState(): Promise<ServiceState> {
   try {
     const { stdout } = await execFileAsync(
       SYSTEMCTL,
-      ["show", ALLOWED_UNIT, "-p", "Id", "-p", "ActiveState", "-p", "SubState", "-p", "MemoryCurrent"],
+      [...SYSTEMCTL_ARGS, "show", ALLOWED_UNIT, "-p", "Id", "-p", "ActiveState", "-p", "SubState", "-p", "MemoryCurrent"],
       { timeout: SHOW_TIMEOUT_MS },
     );
     const parsed = parseSystemctlShow(stdout);
@@ -68,7 +69,7 @@ export async function getServiceState(): Promise<ServiceState> {
     let memoryMb: number | null = null;
     if (parsed.MemoryCurrent !== undefined && parsed.MemoryCurrent !== "") {
       const bytes = Number(parsed.MemoryCurrent);
-      if (!Number.isNaN(bytes)) {
+      if (!Number.isNaN(bytes) && bytes < 18446744073709551615) {
         memoryMb = Math.round(bytes / (1024 * 1024));
       }
     }
@@ -96,7 +97,7 @@ export async function controlService(
   }
 
   try {
-    await execFileAsync(SYSTEMCTL, [action, ALLOWED_UNIT], { timeout: SHOW_TIMEOUT_MS });
+    await execFileAsync(SYSTEMCTL, [...SYSTEMCTL_ARGS, action, ALLOWED_UNIT], { timeout: SHOW_TIMEOUT_MS });
     const service = await getServiceState();
     return { ok: true, service };
   } catch (err: unknown) {

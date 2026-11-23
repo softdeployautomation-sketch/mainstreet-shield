@@ -9,9 +9,9 @@ import { db } from "@/lib/db";
 
 export const PROMPT_KEYS = { MSS_POLICY: "mss.policy" } as const;
 
-// Persona + methodology paragraphs, lifted verbatim from MSS_SYSTEM_PROMPT
-// in lib/clin/cline-session.ts (the Rules: block and tool list are excluded;
-// they live in SAFETY_INVARIANTS / MSS_TOOL_DOCS below).
+// Persona + methodology paragraphs, lifted verbatim from the former
+// MSS_SYSTEM_PROMPT in lib/clin/cline-session.ts (the Rules: block and tool
+// list are excluded; they live in SAFETY_INVARIANTS / MSS_TOOL_DOCS below).
 export const DEFAULT_MSS_POLICY = `You are the MSS Agent for MainStreet Shield, a Cline-powered security-assessment assistant.
 
 You help the user research and validate security findings on systems they own and have explicitly authorized for testing. Reason through the task, use your tools when appropriate, and be concise and direct.
@@ -19,7 +19,7 @@ You help the user research and validate security findings on systems they own an
 Enabled Cline tools: shell, file, search, web. You may use these tools to inspect targets, read files, run safe validation commands, and gather evidence. Do not claim you lack tools — they are enabled.`;
 
 // MSS-specific tool list + asset/report tool sections, lifted verbatim from
-// MSS_SYSTEM_PROMPT in lib/clin/cline-session.ts.
+// the former MSS_SYSTEM_PROMPT in lib/clin/cline-session.ts.
 export const MSS_TOOL_DOCS = `MSS-specific tools:
 - list_assets — Returns all security assets owned by the user's company (id, name, type, target, inScope, groupId). Use when the user asks about their assets, inventory, or scope.
 - list_workflows — Returns all workflows owned by the user's company (id, name, step count, status). Use when the user asks about their workflows, automations, or scan routines.
@@ -86,7 +86,8 @@ export const SAFETY_INVARIANTS = `Rules:
 - Only operate on targets the user has attested as in-scope and owned/authorized by them.
 - Never attack third parties or hosts the user does not control.
 - Prefer explanation and safe validation; ask before any destructive action.
-- You are a real Cline agent, not a generic echo — ground every reply in the actual model output.`;
+- You are a real Cline agent, not a generic echo — ground every reply in the actual model output.
+- If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").`;
 
 export interface PromptResolution {
   body: string;
@@ -96,20 +97,28 @@ export interface PromptResolution {
 }
 
 // Active company row → active global row → default. Request-scoped cache.
+// Falls back to DEFAULT_MSS_POLICY if the DB is unavailable so session start
+// never dies on a prompt-table blip.
 export const resolvePrompt = cache(
   async (key: string, companyId?: string | null): Promise<PromptResolution> => {
     const scopeKey = companyId ?? "global";
-    const rows = await db.promptTemplate.findMany({
-      where: {
-        key,
-        status: "active",
-        scopeKey: companyId ? { in: [companyId, "global"] } : "global",
-      },
-      orderBy: [{ scope: "asc" }, { version: "desc" }],
-    });
-    const row = rows[0];
-    if (row) {
-      return { body: row.body, versionId: row.id, version: row.version, source: row.source };
+    try {
+      const rows = await db.promptTemplate.findMany({
+        where: {
+          key,
+          status: "active",
+          scopeKey: companyId ? { in: [companyId, "global"] } : "global",
+        },
+        orderBy: [{ scope: "asc" }, { version: "desc" }],
+      });
+      const row = rows[0];
+      if (row) {
+        return { body: row.body, versionId: row.id, version: row.version, source: row.source };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.warn(`[prompt-registry] DB read failed for key="${key}", falling back to default: ${msg}`);
     }
     return { body: DEFAULT_MSS_POLICY, versionId: null, version: 0, source: "default" };
   },

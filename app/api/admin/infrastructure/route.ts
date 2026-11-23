@@ -2,7 +2,7 @@
 // Auth: MSS admin session or X-Service-Token === MAINSTREET_SERVICE_TOKEN (shared helper).
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-api-auth";
-import { controlService, getServiceState, ALLOWED_UNIT } from "@/lib/admin-infrastructure";
+import { controlService, getServiceState } from "@/lib/admin-infrastructure";
 import { db } from "@/lib/db";
 
 // GET /api/admin/infrastructure — infra overview (admin only)
@@ -81,9 +81,11 @@ export async function POST(req: Request) {
   let result: { ok: boolean; service?: unknown; error?: string };
 
   if (action === "freeze" || action === "unfreeze") {
-    const killSwitch = await db.shieldKillSwitch.findFirst();
+    let killSwitch = await db.shieldKillSwitch.findFirst();
     if (!killSwitch) {
-      return NextResponse.json({ error: "kill_switch_not_found" }, { status: 404 });
+      killSwitch = await db.shieldKillSwitch.create({
+        data: { frozen: false, reason: null, frozenBy: null, frozenAt: null },
+      });
     }
     await db.shieldKillSwitch.update({
       where: { id: killSwitch.id },
