@@ -22,6 +22,11 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
+function formatDate(value: Date): string {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "—";
+  return value.toLocaleDateString();
+}
+
 export default async function ReportDetailPage({
   params,
 }: {
@@ -96,16 +101,30 @@ export default async function ReportDetailPage({
             <h1 className="font-mono font-bold text-lg text-fg">{doc.title}</h1>
             <p className="text-xs text-fg-muted font-mono">
               Group: {doc.groupName ?? "—"} · v{doc.version} ·
-              {new Date(doc.createdAt || 0).toLocaleDateString()} →{" "}
-              {new Date(doc.updatedAt || 0).toLocaleDateString()}
+              {formatDate(new Date(doc.createdAt))} →{" "}
+              {formatDate(new Date(doc.updatedAt))}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <a
+              href={`/api/mss/agent/report-documents/${doc.id}/export?format=csv`}
+              download
+              className="font-mono text-xs bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded"
+            >
+              Download CSV
+            </a>
+            <a
+              href={`/api/mss/agent/report-documents/${doc.id}/export?format=doc`}
+              download
+              className="font-mono text-xs bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded"
+            >
+              Download DOC
+            </a>
             <Link
-              href="/dashboard/reports"
+              href="/dashboard/assets"
               className="font-mono text-xs text-fg-muted hover:text-brand-600 dark:hover:text-brand-400"
             >
-              Back to list
+              Back to assets
             </Link>
           </div>
         </div>
