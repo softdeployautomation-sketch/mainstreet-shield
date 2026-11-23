@@ -73,8 +73,8 @@ export default async function ReportsPage() {
     groupName: d.groupName ?? null,
     title: d.title,
     version: d.version,
-    createdAt: new Date(d.createdAt),
-    updatedAt: new Date(d.updatedAt),
+    createdAt: d.createdAt ? new Date(d.createdAt) : new Date(0),
+    updatedAt: d.updatedAt ? new Date(d.updatedAt) : new Date(0),
   }));
 
   return (

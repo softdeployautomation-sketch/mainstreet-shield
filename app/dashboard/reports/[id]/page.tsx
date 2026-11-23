@@ -96,8 +96,8 @@ export default async function ReportDetailPage({
             <h1 className="font-mono font-bold text-lg text-fg">{doc.title}</h1>
             <p className="text-xs text-fg-muted font-mono">
               Group: {doc.groupName ?? "—"} · v{doc.version} ·
-              {doc.createdAt.toLocaleDateString()} →{" "}
-              {doc.updatedAt.toLocaleDateString()}
+              {new Date(doc.createdAt || 0).toLocaleDateString()} →{" "}
+              {new Date(doc.updatedAt || 0).toLocaleDateString()}
             </p>
           </div>
           <div className="flex items-center gap-2">
