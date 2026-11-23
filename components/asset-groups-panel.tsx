@@ -102,12 +102,12 @@ export function AssetGroupsPanel({ groups, canManage }: AssetGroupsPanelProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="New group name…"
-            className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
+            className="flex-1 rounded border border-border bg-bg-elevated px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500"
           />
           <button
             type="submit"
             disabled={submitting}
-            className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {submitting ? "Creating…" : "Create"}
           </button>
@@ -123,7 +123,7 @@ export function AssetGroupsPanel({ groups, canManage }: AssetGroupsPanelProps) {
             return (
               <div
                 key={g.id}
-                className="flex items-center justify-between px-3 py-2 rounded border border-border/50 bg-zinc-900/30"
+                className="flex items-center justify-between px-3 py-2 rounded border border-border/50 bg-surface-hover"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-mono text-fg">{g.name}</span>
@@ -133,7 +133,7 @@ export function AssetGroupsPanel({ groups, canManage }: AssetGroupsPanelProps) {
                 </div>
                 <button
                   onClick={() => handleDelete(g.id, g.name)}
-                  className="text-xs text-rose-500 hover:text-rose-400"
+                  className="text-xs text-severity-critical hover:text-severity-critical/80"
                 >
                   Delete
                 </button>
@@ -143,12 +143,12 @@ export function AssetGroupsPanel({ groups, canManage }: AssetGroupsPanelProps) {
         </div>
       )}
       {error ? (
-        <p className="mt-3 text-sm text-rose-400 font-mono" role="alert">
+        <p className="mt-3 text-sm text-severity-critical font-mono" role="alert">
           {error}
         </p>
       ) : null}
       {success ? (
-        <p className="mt-3 text-sm text-emerald-400 font-mono" role="status">
+        <p className="mt-3 text-sm text-severity-low font-mono" role="status">
           {success}
         </p>
       ) : null}

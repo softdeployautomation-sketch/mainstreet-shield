@@ -100,47 +100,11 @@ export default async function AssetsPage() {
   const ungrouped = assets.filter((a) => !a.groupId);
 
   return (
-    <div className="min-h-screen bg-bg text-fg flex flex-col">
-      <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur py-3 px-4">
-        <div className="mx-auto max-w-6xl">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-              <span className="text-xl">›_</span>
-              <span className="text-sm">MainStreet Shield</span>
-            </Link>
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                Dashboard
-              </Link>
-              <Link href="/dashboard/assets" className="text-xs font-mono text-brand-600 dark:text-brand-400 font-bold">
-                Assets
-              </Link>
-              {!hasCompany && (
-                <Link
-                  href="/company"
-                  className="text-xs font-mono text-emerald-400 hover:text-emerald-300 underline"
-                >
-                  Add Company
-                </Link>
-              )}
-              <Link href="/shield" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                Lab Console
-              </Link>
-              <form action="/api/auth/logout" method="post">
-                <button className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                  Sign out
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <section className="flex-1 mx-auto max-w-6xl px-4 py-12">
-        <div className="mb-8">
-          <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-            ← Back to dashboard
-          </Link>
+    <section className="py-8">
+      <div className="mb-8">
+        <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
+          ← Back to dashboard
+        </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight mt-2">Assets</h1>
         </div>
 
@@ -378,8 +342,7 @@ export default async function AssetsPage() {
             </p>
           </div>
         )}
-      </section>
-    </div>
+    </section>
   );
 }
 

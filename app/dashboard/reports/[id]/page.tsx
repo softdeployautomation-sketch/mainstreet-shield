@@ -51,27 +51,12 @@ export default async function ReportDetailPage({
   );
   if (!res.ok) {
     return (
-      <div className="min-h-screen bg-bg text-fg flex flex-col">
-        <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur py-3 px-4">
-          <div className="mx-auto max-w-6xl">
-            <div className="flex items-center justify-between">
-              <Link href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-                <span className="text-xl">›_</span>
-                <span className="text-sm">MainStreet Shield</span>
-              </Link>
-              <div className="flex items-center gap-4">
-                <Link href="/dashboard/reports" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                  Reports
-                </Link>
-              </div>
-            </div>
-          </div>
-        </nav>
-        <div className="mx-auto max-w-6xl py-8 px-4">
+      <section className="py-8">
+        <div className="py-8">
           <h1 className="font-mono font-bold text-lg text-fg mb-4">Report</h1>
           <p className="text-sm text-fg-muted font-mono">Report not found.</p>
         </div>
-      </div>
+      </section>
     );
   }
   const data = await res.json();
@@ -79,23 +64,8 @@ export default async function ReportDetailPage({
   const versions = (doc.content || "").split(/\n---\n/).filter(Boolean);
 
   return (
-    <div className="min-h-screen bg-bg text-fg flex flex-col">
-      <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur py-3 px-4">
-        <div className="mx-auto max-w-6xl">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-              <span className="text-xl">›_</span>
-              <span className="text-sm">MainStreet Shield</span>
-            </Link>
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard/reports" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                Reports
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-      <div className="mx-auto max-w-4xl py-8 px-4">
+    <section className="py-8">
+      <div className="py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="font-mono font-bold text-lg text-fg">{doc.title}</h1>
@@ -143,6 +113,6 @@ export default async function ReportDetailPage({
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

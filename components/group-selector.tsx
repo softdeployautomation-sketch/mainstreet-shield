@@ -55,7 +55,7 @@ export function GroupSelector({
       value={groupId ?? ""}
       onChange={handleChange}
       disabled={saving}
-      className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+      className="rounded border border-border bg-bg-elevated px-2 py-1 text-xs text-fg focus:ring-2 focus:ring-brand-500 disabled:opacity-60"
     >
       <option value="">Ungrouped</option>
       {groups.map((g) => (

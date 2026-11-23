@@ -140,46 +140,22 @@ export default function WorkflowDetailPage({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg text-fg flex flex-col">
-        <section className="flex-1 mx-auto max-w-6xl px-4 py-12">
-          <p className="text-sm text-fg-muted">Loading workflow…</p>
-        </section>
-      </div>
+      <section className="py-8">
+        <p className="text-sm text-fg-muted">Loading workflow…</p>
+      </section>
     );
   }
 
   if (!workflow) {
     return (
-      <div className="min-h-screen bg-bg text-fg flex flex-col">
-        <section className="flex-1 mx-auto max-w-6xl px-4 py-12">
-          <p className="text-sm text-rose-400">{error || "Workflow not found"}</p>
-          <Link href="/dashboard/workflows" className="text-xs font-mono text-brand-600 hover:text-brand-400">
-            ← All workflows
-          </Link>
-        </section>
-      </div>
+      <section className="py-8">
+        <p className="text-sm text-rose-400">{error || "Workflow not found"}</p>
+        <Link href="/dashboard/workflows" className="text-xs font-mono text-brand-600 hover:text-brand-400">
+          ← All workflows
+        </Link>
+      </section>
     );
   }
-
-  const renderNav = () => (
-    <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur py-3 px-4">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-            <span className="text-xl">›_</span>
-            <span className="text-sm">MainStreet Shield</span>
-          </Link>
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">Dashboard</Link>
-            <Link href="/dashboard/assets" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">Assets</Link>
-            <Link href="/dashboard/workflows" className="text-xs font-mono text-brand-600 dark:text-brand-400 font-bold">Workflows</Link>
-            <Link href="/shield" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">Lab Console</Link>
-            <form action="/api/auth/logout" method="post"><button className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">Sign out</button></form>
-          </div>
-        </div>
-      </div>
-    </nav>
-  );
 
   const headerActions = (
     <div className="flex items-center gap-2">
@@ -272,12 +248,9 @@ export default function WorkflowDetailPage({
   );
 
   return (
-    <div className="min-h-screen bg-bg text-fg flex flex-col">
-      {renderNav()}
-      <section className="flex-1 mx-auto max-w-6xl px-4 py-12">
-        {headerActions}
-        {editing ? editMode : viewMode}
-      </section>
-    </div>
+    <section className="py-8">
+      {headerActions}
+      {editing ? editMode : viewMode}
+    </section>
   );
 }

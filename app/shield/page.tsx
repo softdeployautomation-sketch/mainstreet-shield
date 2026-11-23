@@ -28,36 +28,11 @@ export default async function ShieldPage() {
   const canRunAgents = user.tier === "3" || user.tier === "5";
 
   return (
-    <div className="min-h-screen bg-bg text-fg flex flex-col">
-      <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur py-3 px-4">
-        <div className="mx-auto max-w-6xl">
-          <div className="flex items-center justify-between">
-            <a href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-              <span className="text-xl">›_</span>
-              <span className="text-sm">MainStreet Shield</span>
-            </a>
-            <div className="flex items-center gap-4">
-              <a href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                Dashboard
-              </a>
-              <a href="/settings" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                Settings
-              </a>
-              <form action="/api/auth/logout" method="post">
-                <button className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-                  Sign out
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <section className="flex-1 mx-auto max-w-4xl px-4 py-12">
-        <div className="mb-8">
-          <a href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
-            ← Back to dashboard
-          </a>
+    <section className="py-8">
+      <div className="mb-8">
+        <a href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">
+          ← Back to dashboard
+        </a>
           <h1 className="text-3xl font-display font-bold tracking-tight mt-2">
             Lab Console
           </h1>
@@ -122,7 +97,6 @@ export default async function ShieldPage() {
             )}
           </>
         )}
-      </section>
-    </div>
+    </section>
   );
 }

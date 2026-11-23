@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { Check } from "lucide-react";
 
 interface CreatedWorkflow {
   id: string;
@@ -125,7 +126,7 @@ export function DescribeWorkflowForm() {
       {createdWorkflow && (
         <div className="mb-4 rounded border border-brand-600/30 bg-brand-900/20 p-4">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-brand-400 font-mono text-xs">✓</span>
+            <Check className="w-3 h-3 text-brand-400" />
             <span className="font-mono font-semibold text-brand-400">Workflow created</span>
           </div>
           <div className="text-sm font-mono text-fg mb-2">{createdWorkflow.name}</div>
@@ -165,7 +166,7 @@ export function DescribeWorkflowForm() {
             placeholder="Describe the workflow you want to create…"
             rows={3}
             disabled={creating}
-            className="w-full rounded border border-border bg-white px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors disabled:opacity-60"
+            className="w-full rounded border border-border bg-bg-elevated px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-opacity disabled:opacity-60"
           />
           <div className="mt-3 flex items-end gap-2">
             <button
@@ -178,7 +179,7 @@ export function DescribeWorkflowForm() {
             {creating && (
               <button
                 onClick={cancel}
-                className="rounded border border-border bg-white px-3 py-2 text-xs font-mono text-fg hover:bg-bg-elevated"
+                className="rounded border border-border bg-bg-elevated px-3 py-2 text-xs font-mono text-fg hover:bg-surface-hover"
               >
                 Cancel
               </button>
@@ -188,7 +189,7 @@ export function DescribeWorkflowForm() {
       )}
 
       {error && (
-        <div className="mt-3 rounded bg-rose-900/20 border border-rose-500/30 p-3 text-sm text-rose-400">
+        <div className="mt-3 rounded bg-severity-critical/20 border border-severity-critical/30 p-3 text-sm text-severity-critical">
           {error}
         </div>
       )}

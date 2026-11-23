@@ -115,7 +115,7 @@ export function WorkflowBuilder() {
       </div>
 
       {error && (
-        <div className="rounded bg-rose-900/20 border border-rose-500/30 p-3 text-sm text-rose-400">
+        <div className="rounded bg-severity-critical/20 border border-severity-critical/30 p-3 text-sm text-severity-critical">
           {error}
         </div>
       )}
@@ -135,7 +135,7 @@ export function WorkflowBuilder() {
             workflows.map((wf) => (
               <div
                 key={wf.id}
-                className="px-4 py-3 hover:bg-white/5 transition-colors"
+                className="px-4 py-3 hover:bg-surface-hover transition-opacity"
               >
                 <div className="flex items-center justify-between mb-2">
                   <a
@@ -150,19 +150,19 @@ export function WorkflowBuilder() {
                         <input
                           type="text"
                           defaultValue={wf.name}
-                          className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg"
+                          className="rounded border border-border bg-bg-elevated px-2 py-1 text-[10px] font-mono text-fg"
                           onChange={(e) => setNewName(e.target.value)}
                           autoFocus
                         />
                         <button
                           onClick={() => saveRename(wf.id)}
-                          className="rounded border border-brand-600 bg-brand-600 px-2 py-1 text-[10px] font-mono text-white hover:!bg-brand-500"
+                          className="rounded border border-brand-600 bg-brand-600 px-2 py-1 text-[10px] font-mono text-white hover:bg-brand-500"
                         >
                           Save
                         </button>
                         <button
                           onClick={cancelRename}
-                          className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
+                          className="rounded border border-border bg-bg-elevated px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
                         >
                           Cancel
                         </button>
@@ -171,14 +171,14 @@ export function WorkflowBuilder() {
                       <>
                         <button
                           onClick={() => startRename(wf.id, wf.name)}
-                          className="rounded border border-border bg-white px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
+                          className="rounded border border-border bg-bg-elevated px-2 py-1 text-[10px] font-mono text-fg hover:bg-bg-elevated"
                         >
                           Rename
                         </button>
                         <button
                           onClick={() => confirmDelete(wf.id)}
                           disabled={deleting === wf.id}
-                          className="rounded border border-rose-500/40 bg-white px-2 py-1 text-[10px] font-mono text-rose-400 hover:bg-rose-900/20 disabled:opacity-60"
+                          className="rounded border border-border/50 bg-bg-elevated px-2 py-1 text-[10px] font-mono text-severity-critical hover:bg-severity-critical/20 disabled:opacity-60"
                         >
                           Delete
                         </button>

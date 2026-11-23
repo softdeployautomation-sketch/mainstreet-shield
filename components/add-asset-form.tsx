@@ -86,7 +86,7 @@ export function AddAssetForm() {
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           placeholder="e.g. example.com or 1.2.3.4 or https://example.com"
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
+          className="w-full rounded border border-border bg-bg-elevated px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500"
         />
       </div>
       <div>
@@ -98,7 +98,7 @@ export function AddAssetForm() {
           name="type"
           value={type}
           onChange={(e) => setType(e.target.value)}
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
+          className="w-full rounded border border-border bg-bg-elevated px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500"
         >
           <option value="web">Web</option>
           <option value="api">API</option>
@@ -117,34 +117,34 @@ export function AddAssetForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Optional display name"
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:ring-2 focus:ring-emerald-500"
+          className="w-full rounded border border-border bg-bg-elevated px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-brand-500"
         />
       </div>
       <button
         type="submit"
         disabled={submitting}
-        className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+        className="rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed"
       >
         {submitting ? "Adding…" : "Add Asset"}
       </button>
       {error ? (
-        <p className="col-span-full text-sm text-rose-400 font-mono" role="alert">
+        <p className="col-span-full text-sm text-severity-critical font-mono" role="alert">
           {error}
         </p>
       ) : null}
       {companyMissing && (
-        <div className="col-span-full rounded border border-rose-500/30 bg-rose-900/20 p-4 mt-2">
-          <p className="text-sm text-rose-400 font-mono mb-2">{error}</p>
+        <div className="col-span-full rounded border border-severity-critical/30 bg-severity-critical/20 p-4 mt-2">
+          <p className="text-sm text-severity-critical font-mono mb-2">{error}</p>
           <Link
             href={companyUrl}
-            className="inline-block rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+            className="inline-block rounded bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-500"
           >
             Create Company first
           </Link>
         </div>
       )}
       {success ? (
-        <p className="col-span-full text-sm text-emerald-400 font-mono" role="status">
+        <p className="col-span-full text-sm text-severity-low font-mono" role="status">
           {success}
         </p>
       ) : null}

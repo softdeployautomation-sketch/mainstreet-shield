@@ -309,7 +309,7 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sk-…"
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
+                className="w-full rounded border border-border bg-bg-elevated px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-opacity dark:text-fg dark:border-border"
               />
               <p className="text-xs text-fg-muted">Leave blank to keep the existing key.</p>
             </div>
@@ -319,7 +319,7 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
                 placeholder="e.g. claude-3-5-sonnet"
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
+                className="w-full rounded border border-border bg-bg-elevated px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-opacity dark:text-fg dark:border-border"
               />
               <p className="text-xs text-fg-muted">Optional — Cline default if blank.</p>
             </div>
@@ -329,7 +329,7 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
                 value={apiEndpoint}
                 onChange={(e) => setApiEndpoint(e.target.value)}
                 placeholder="https://api.cline.bot"
-                className="w-full rounded border border-border bg-white px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-colors dark:bg-bg-elevated dark:text-fg dark:border-border"
+                className="w-full rounded border border-border bg-bg-elevated px-4 py-3.5 text-sm text-fg focus:ring-2 focus:ring-brand-500 transition-opacity dark:text-fg dark:border-border"
               />
               <p className="text-xs text-fg-muted">Leave blank for Cline default.</p>
             </div>
@@ -338,12 +338,12 @@ export function ClineSettingsCard({ settings }: { settings: ClineSettings | null
           <button
             type="submit"
             disabled={saving}
-            className="w-full rounded bg-brand-600 px-4 py-3 text-sm font-mono font-bold text-white hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            className="w-full rounded bg-brand-600 px-4 py-3 text-sm font-mono font-bold text-white hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saving ? "Saving…" : "Save Cline settings"}
           </button>
           {saved && <span className="text-xs text-fg-muted">Saved.</span>}
-          {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p className="mt-2 text-xs text-severity-critical">{error}</p>}
         </form>
 
         {modalOpen && modalData && (

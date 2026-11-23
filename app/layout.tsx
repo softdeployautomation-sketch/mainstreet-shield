@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+
+const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "MainStreet Shield",
@@ -10,7 +14,7 @@ export const metadata: Metadata = {
 const themeScript = `
 (() => {
   const STORAGE_KEY = "ms-theme";
-  const DEFAULT = "light";
+  const DEFAULT = "dark";
   const root = document.documentElement;
 
   function setTheme(theme: string) {
@@ -45,7 +49,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: themeScript }}
         ></script>
       </head>
-      <body className="bg-bg text-fg min-h-screen selection:bg-brand-200 selection:text-fg">
+      <body className={`${geist.variable} ${geistMono.variable} bg-bg text-fg min-h-screen selection:bg-brand-200 selection:text-fg`}>
         {children}
       </body>
     </html>

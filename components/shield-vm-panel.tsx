@@ -108,25 +108,25 @@ export function ShieldVmPanel({ userId, isAdmin }: { userId: string; isAdmin: bo
 
   const stateColor = (s: string | null | undefined) => {
     switch (s) {
-      case "running": return "text-emerald-400 bg-emerald-900/20 border-emerald-500/30";
-      case "starting": return "text-yellow-400 bg-yellow-900/20 border-yellow-500/30";
-      case "stopping": return "text-yellow-400 bg-yellow-900/20 border-yellow-500/30";
-      case "failed": return "text-rose-400 bg-rose-900/20 border-rose-500/30";
-      default: return "text-zinc-500 bg-zinc-900/50 border-zinc-800";
+      case "running": return "text-severity-low bg-severity-low/20 border-severity-low/30";
+      case "starting": return "text-accent-600 bg-accent-600/20 border-accent-600/30";
+      case "stopping": return "text-accent-600 bg-accent-600/20 border-accent-600/30";
+      case "failed": return "text-severity-critical bg-severity-critical/20 border-severity-critical/30";
+      default: return "text-fg-muted bg-surface border-border";
     }
   };
 
   return (
-    <div className="flex-1 flex flex-col gap-4 bg-zinc-900/50 rounded-xl border border-zinc-800 p-6">
+    <div className="flex-1 flex flex-col gap-4 bg-surface rounded-xl border border-border p-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <span
-              className={`w-2 h-2 rounded-full ${stateColor(vm?.state) ?? "bg-zinc-500"}`}
+              className={`w-2 h-2 rounded-full ${stateColor(vm?.state) ?? "bg-fg-muted"}`}
             ></span>
             {vm?.label || "shield-lab"}
           </h2>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-fg-muted mt-1">
             {vm?.state === "running" && vm?.vmIp ? `VM IP: ${vm.vmIp}` : "Linux VM with GUI — noVNC console in browser"}
             {vm?.ramMb && vm?.vcpu && vm?.diskGb ? ` · ${vm.ramMb}MB RAM · ${vm.vcpu} vCPU · ${vm.diskGb}GB disk` : ""}
           </p>
@@ -135,7 +135,7 @@ export function ShieldVmPanel({ userId, isAdmin }: { userId: string; isAdmin: bo
           <button
             onClick={startVm}
             disabled={loading || vm?.state === "starting" || vm?.state === "running"}
-            className="flex-1 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:!bg-emerald-500 disabled:hover:!bg-emerald-600"
+            className="flex-1 rounded bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-brand-500 disabled:hover:bg-brand-700"
           >
             {loading ? "Starting…" : vm?.state === "running" ? "Running" : "Start Linux PC"}
           </button>
@@ -143,7 +143,7 @@ export function ShieldVmPanel({ userId, isAdmin }: { userId: string; isAdmin: bo
             <button
               onClick={stopVm}
               disabled={loading || vm?.state === "stopped" || vm?.state === "stopping"}
-              className="flex-1 rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:!bg-rose-500 disabled:hover:!bg-rose-600"
+              className="flex-1 rounded bg-severity-critical px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-severity-critical/90 disabled:hover:bg-severity-critical/90"
             >
               {loading ? "Stopping…" : "Shutdown (admin)"}
             </button>
@@ -152,25 +152,25 @@ export function ShieldVmPanel({ userId, isAdmin }: { userId: string; isAdmin: bo
       </div>
 
       {error && (
-        <div className="rounded bg-rose-900/20 border border-rose-500/30 p-3 text-sm text-rose-400">
+        <div className="rounded bg-severity-critical/20 border border-severity-critical/30 p-3 text-sm text-severity-critical">
           {error}
         </div>
       )}
       {message && (
-        <div className="rounded bg-emerald-900/20 border border-emerald-500/30 p-3 text-sm text-emerald-400">
+        <div className="rounded bg-severity-low/20 border border-severity-low/30 p-3 text-sm text-severity-low">
           {message}
         </div>
       )}
 
       {vm?.state === "running" && vm?.vncProxyUrl ? (
-        <div className="flex-1 bg-zinc-950 rounded border border-zinc-800 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5 bg-zinc-900/50">
-            <span className="text-xs text-zinc-400">noVNC Console (VNC port {vm.vncPort})</span>
+        <div className="flex-1 bg-bg rounded border border-border overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-3 py-1.5 bg-surface-hover">
+            <span className="text-xs text-fg-muted">noVNC Console (VNC port {vm.vncPort})</span>
             <a
               href={vm.vncProxyUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-emerald-400 hover:underline"
+              className="text-xs text-brand-400 hover:underline"
             >
               Open in new tab ↗
             </a>
@@ -182,8 +182,8 @@ export function ShieldVmPanel({ userId, isAdmin }: { userId: string; isAdmin: bo
           />
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center bg-zinc-900/30 rounded border border-zinc-800/50 p-8">
-          <span className="text-zinc-500 text-sm">VM not running — click "Start Linux PC" to boot</span>
+        <div className="flex-1 flex flex-col items-center justify-center bg-surface-hover rounded border border-border/50 p-8">
+          <span className="text-fg-muted text-sm">VM not running — click "Start Linux PC" to boot</span>
         </div>
       )}
     </div>

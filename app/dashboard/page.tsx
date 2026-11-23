@@ -108,27 +108,7 @@ export default async function DashboardPage() {
   const canRunAgents = user?.tier === "3" || user?.tier === "5";
 
   return (
-    <div className="min-h-screen bg-bg text-fg flex flex-col">
-      <nav className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur py-3 px-4">
-        <div className="mx-auto max-w-6xl">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 font-mono font-bold text-brand-600 dark:text-brand-400">
-              <span className="text-xl">&#8594;_</span>
-              <span className="text-sm">MainStreet Shield</span>
-            </Link>
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard" className="text-xs font-mono text-brand-600 dark:text-brand-400">Dashboard</Link>
-              <Link href="/shield" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Lab Console</Link>
-              <Link href="/settings" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Settings</Link>
-              <form action="/api/auth/logout" method="post">
-                <button className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Sign out</button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <main className="flex-1 mx-auto max-w-6xl px-4 py-6">
+    <section className="py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-display font-bold tracking-tight">Security Research Dashboard</h1>
           <p className="text-sm text-fg-muted mt-1">
@@ -330,7 +310,6 @@ export default async function DashboardPage() {
             </div>
           </section>
         )}
-      </main>
-    </div>
+    </section>
   );
 }
