@@ -6,6 +6,7 @@ import { getUserReferralLink } from "@/lib/referral";
 import CopyButton from "@/components/CopyButton";
 import { DeleteAccountForm } from "@/components/delete-account-form";
 import { ClineSettingsCard } from "@/components/cline-settings-card";
+import { AdminPromptEditor } from "@/components/admin-prompt-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: { [
                 <CopyButton link={`https://mainstreetmint.click/r/${referralLink.code}`} label="Copy link" />
               </dd>
             </div>
+            <div className="flex justify-between">
+              <dt className="text-fg-muted">Share signup link</dt>
+              <dd className="font-mono text-sm break-all">
+                https://mainstreetmint.click/signup?ref={referralLink.code}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-fg-muted">How it works</dt>
+              <dd className="font-mono text-xs text-fg-muted">
+                Friends sign up with your ref code and you earn referral credit.
+              </dd>
+            </div>
           </dl>
         </div>
 
@@ -131,6 +144,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: { [
             <ClineSettingsCard settings={null} />
           </div>
         )}
+
+        {/* Admin-only prompt editor */}
+        {user.role === "admin" && <AdminPromptEditor />}
     </section>
   );
 }
