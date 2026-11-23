@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 
 import { getSession, requirePasswordUser } from "@/lib/auth";
 
@@ -32,9 +33,16 @@ export default async function ReportDetailPage({
   if (!pw.user) redirect("/login");
   if (pw.needPassword) redirect("/settings?need-password=1");
   const { id } = await params;
+  const cookieStore = await cookies();
+  const sessionToken = cookieStore.get("shield-session")?.value;
   const res = await fetch(
     `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/api/mss/agent/report-documents/${id}`,
-    { cache: "no-store" },
+    {
+      cache: "no-store",
+      headers: {
+        ...(sessionToken ? { cookie: `shield-session=${sessionToken}` } : {}),
+      },
+    },
   );
   if (!res.ok) {
     return (
