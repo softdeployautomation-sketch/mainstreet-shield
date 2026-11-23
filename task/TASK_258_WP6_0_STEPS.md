@@ -12,4 +12,4 @@
 | 2026-11-23 | 4. Dashboard + reports pages onto shell — AFTER | DONE | Previously migrated |
 | 2026-11-23 | 5. Assets + shield + settings + form tokenisation — AFTER | DONE | Previously migrated |
 | 2026-11-23 | 6. Gates — tsc / build / prisma validate / secrets | DONE | All pass |
-| 2026-11-23 | 7. Commit — "fix(ui): WP6.0 spec compliance — violet tokens, single nav, shell layout" | IN PROGRESS | |
+| 2026-11-23 | 7. Commit — "fix(ui): WP6.0 spec compliance — violet tokens, single nav, shell layout" | DONE | SHA: 6da1ab7 |
