@@ -63,7 +63,7 @@ export async function POST(
     }
 
     const { id } = await params;
-    const { name, description, status } = await req.json();
+    const { name, description, agent_prompt, status } = await req.json();
 
     const workflow = await db.workflow.findUnique({
       where: { id },
@@ -85,8 +85,23 @@ export async function POST(
       where: { id },
       data: {
         ...(name && { name }),
-        ...(description && { description }),
+        ...(description !== undefined && { description }),
+        ...(agent_prompt !== undefined && { agentPrompt: agent_prompt }),
         ...(status && { status }),
+      },
+      include: {
+        company: true,
+        workflowTriggers: {
+          orderBy: { nextRunAt: "asc" },
+        },
+        steps: {
+          orderBy: { order: "asc" },
+        },
+        _count: {
+          select: {
+            workflowRuns: true,
+          },
+        },
       },
     });
 

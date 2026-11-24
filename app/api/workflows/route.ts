@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { z } from "zod";
+import { parseCron, nextRunAt } from "@/lib/workflows/cron";
 
 const workflowSchema = z.object({
   companyId: z.string().optional(),
@@ -9,6 +10,7 @@ const workflowSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   agent_prompt: z.string().min(1),
+  status: z.enum(["draft", "active", "completed", "archived"]).optional(),
   cron: z.string().optional(),
   triggerType: z.enum(["daily", "one_time", "custom", "manual"]).optional(),
   dailyTime: z.string().optional(), // "HH:mm" for daily
@@ -61,7 +63,19 @@ export async function POST(req: Request) {
       );
     }
 
-    let { companyId, name, description, agent_prompt, cron, triggerType, dailyTime, oneTimeDateTime, enabled, steps } = data.data;
+    let {
+      companyId,
+      name,
+      description,
+      agent_prompt,
+      status,
+      cron,
+      triggerType,
+      dailyTime,
+      oneTimeDateTime,
+      enabled,
+      steps,
+    } = data.data;
 
     // Always resolve/verify company from the session. Never trust a
     // client-supplied companyId without an ownership check (regression guard).
@@ -98,11 +112,24 @@ export async function POST(req: Request) {
       if (!isNaN(dt.getTime())) {
         computedCron = `${dt.getUTCMinutes()} ${dt.getUTCHours()} ${dt.getUTCDate()} ${dt.getUTCMonth() + 1} *`;
         maxRuns = 1; // one-time trigger
+        // One-time must be in the future
+        if (dt.getTime() <= Date.now()) {
+          return NextResponse.json(
+            { error: "one-time datetime must be in the future" },
+            { status: 400 }
+          );
+        }
       }
     } else if (triggerType === "custom" && cron?.trim()) {
+      if (!parseCron(cron.trim())) {
+        return NextResponse.json({ error: "invalid cron" }, { status: 400 });
+      }
       computedCron = cron.trim();
     } else if (cron?.trim()) {
       // Legacy: cron provided without triggerType
+      if (!parseCron(cron.trim())) {
+        return NextResponse.json({ error: "invalid cron" }, { status: 400 });
+      }
       computedCron = cron.trim();
     }
 
@@ -112,6 +139,8 @@ export async function POST(req: Request) {
         createdById,
         name,
         description: description ?? null,
+        agentPrompt: agent_prompt ?? null,
+        status: status ?? "draft",
         steps:
           steps?.length
             ? {
@@ -133,76 +162,14 @@ export async function POST(req: Request) {
           workflowId: workflow.id,
           cron: computedCron,
           enabled: enabled ?? true,
-          nextRunAt: null, // scheduler tick will compute
+          nextRunAt: nextRunAt(computedCron, new Date()),
           runsDone: 0,
           maxRuns,
         },
       });
     }
 
-    // Create WorkflowRun + MssAgentSession if agent_prompt provided.
-    if (agent_prompt) {
-      let session;
-      try {
-        session = await db.mssAgentSession.findFirst({
-          where: { userId: createdById },
-          orderBy: { createdAt: "desc" },
-        });
-        if (!session) {
-          session = await db.mssAgentSession.create({
-            data: {
-              userId: createdById,
-              title: `Workflow: ${name}`,
-            },
-          });
-        }
-      } catch (sessionErr) {
-        // Session/table may not exist yet — workflow is still valid without it
-        session = undefined;
-      }
-
-      if (session) {
-        const run = await db.workflowRun.create({
-          data: {
-            workflowId: workflow.id,
-            status: "pending",
-            sessionId: session.id,
-            startedAt: new Date(),
-          },
-          include: { session: true },
-        });
-
-        // Create initial agent_prompt step
-        await db.workflowRunStep.create({
-          data: {
-            runId: run.id,
-            name: "agent_prompt",
-            type: "agent_prompt",
-            status: "pending",
-            input: { prompt: agent_prompt },
-          },
-        });
-
-        // Store the initial agent_prompt as a ClineAgentMessage so the chat
-        // session history is available even if ClineCore loses its local transcript.
-        if (run.sessionId) {
-          try {
-            await db.clineAgentMessage.create({
-              data: {
-                sessionId: run.sessionId,
-                userId: createdById,
-                role: "user",
-                content: { text: agent_prompt },
-              },
-            });
-          } catch (msgErr) {
-            // ClineAgentMessage table may not exist yet — non-fatal
-          }
-        }
-      }
-    }
-
-    return NextResponse.json({ ok: true, workflow });
+    return NextResponse.json({ ok: true, workflow }, { status: 201 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "workflow creation failed";
     return NextResponse.json(

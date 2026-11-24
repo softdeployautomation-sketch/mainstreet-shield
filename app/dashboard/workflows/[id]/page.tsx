@@ -65,6 +65,9 @@ export default function WorkflowDetailPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editAgentPrompt, setEditAgentPrompt] = useState("");
+  const [editStatus, setEditStatus] = useState<"draft" | "active" | "completed" | "archived">("draft");
   const [editSteps, setEditSteps] = useState<WorkflowStep[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -91,6 +94,9 @@ export default function WorkflowDetailPage() {
         if (cancelled) return;
         setWorkflow(data.workflow);
         setEditName(data.workflow.name);
+        setEditDescription(data.workflow.description ?? "");
+        setEditAgentPrompt(data.workflow.agentPrompt ?? "");
+        setEditStatus(data.workflow.status as "draft" | "active" | "completed" | "archived");
         setEditSteps(data.workflow.steps);
       } catch (err) {
         if (!cancelled) {
@@ -119,6 +125,9 @@ export default function WorkflowDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: editName.trim(),
+          description: editDescription.trim() || undefined,
+          agent_prompt: editAgentPrompt.trim() || undefined,
+          status: editStatus,
           steps: editSteps.map((s) => ({
             name: s.name,
             tool: s.tool || undefined,
@@ -135,8 +144,14 @@ export default function WorkflowDetailPage() {
         }
         throw new Error(errData.error || "Failed to save workflow");
       }
-      const data = await res.json();
-      setWorkflow(data.workflow);
+      // Refetch the full workflow to get complete data (triggers, steps, runs)
+      const fetchRes = await fetch(`/api/workflows/${encodeURIComponent(id)}`, {
+        credentials: "same-origin",
+      });
+      if (fetchRes.ok) {
+        const data = await fetchRes.json();
+        setWorkflow(data.workflow);
+      }
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save workflow");
@@ -148,6 +163,9 @@ export default function WorkflowDetailPage() {
   const handleCancel = () => {
     if (workflow) {
       setEditName(workflow.name);
+      setEditDescription(workflow.description ?? "");
+      setEditAgentPrompt(workflow.agentPrompt ?? "");
+      setEditStatus(workflow.status as "draft" | "active" | "completed" | "archived");
       setEditSteps(workflow.steps);
     }
     setEditing(false);
@@ -396,6 +414,37 @@ export default function WorkflowDetailPage() {
           className="w-full rounded border border-border bg-bg px-3 py-2 text-sm font-mono text-fg"
           required
         />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-mono text-fg-muted">Description</label>
+        <textarea
+          value={editDescription}
+          onChange={(e) => setEditDescription(e.target.value)}
+          rows={3}
+          className="w-full rounded border border-border bg-bg px-3 py-2 text-sm font-mono text-fg"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-mono text-fg-muted">Agent prompt</label>
+        <textarea
+          value={editAgentPrompt}
+          onChange={(e) => setEditAgentPrompt(e.target.value)}
+          rows={4}
+          className="w-full rounded border border-border bg-bg px-3 py-2 text-sm font-mono text-fg"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-mono text-fg-muted">Status</label>
+        <select
+          value={editStatus}
+          onChange={(e) => setEditStatus(e.target.value as "draft" | "active" | "completed" | "archived")}
+          className="w-full rounded border border-border bg-bg px-3 py-2 text-sm font-mono text-fg"
+        >
+          <option value="draft">Draft</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+          <option value="archived">Archived</option>
+        </select>
       </div>
       <div>
         <div className="mb-3 flex items-center justify-between">
