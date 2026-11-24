@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { parseCron } from "@/lib/workflows/cron";
 
 const MAX_ACTIVE_TRIGGERS_PER_COMPANY = 5;
 const MIN_INTERVAL_MINUTES = 10;
@@ -91,6 +92,15 @@ export async function POST(req: Request) {
     if (existingTrigger) {
       return NextResponse.json(
         { error: "A trigger with this cron expression already exists for this workflow" },
+        { status: 400 }
+      );
+    }
+
+    // Validate five-field cron format
+    const parsedCron = parseCron(cron);
+    if (!parsedCron) {
+      return NextResponse.json(
+        { error: "Invalid cron expression: expected 5-field format (minute hour day month weekday)" },
         { status: 400 }
       );
     }
