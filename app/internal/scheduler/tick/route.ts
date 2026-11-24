@@ -45,7 +45,10 @@ export async function POST(req: Request) {
     }
 
     const providedToken = authHeader.substring("Bearer ".length);
-    if (!timingSafeEqual(Buffer.from(schedulerToken), Buffer.from(providedToken))) {
+    if (
+      providedToken.length !== schedulerToken.length ||
+      !timingSafeEqual(Buffer.from(schedulerToken), Buffer.from(providedToken))
+    ) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
