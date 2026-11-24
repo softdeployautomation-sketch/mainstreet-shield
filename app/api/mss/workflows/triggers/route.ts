@@ -20,8 +20,18 @@ export async function GET(req: Request) {
       where.workflowId = workflowId;
     } else if (session.role !== "admin") {
       // Non-admin agents only see triggers for their own company's workflows
+      const user = await db.user.findUnique({
+        where: { id: session.userId },
+        include: { company: true },
+      });
+      const userCompanyId = user?.company?.id;
+
+      if (!userCompanyId) {
+        return NextResponse.json({ error: "user has no company" }, { status: 403 });
+      }
+
       where.workflow = {
-        companyId: session.userId,
+        companyId: userCompanyId,
       };
     }
     // admin sees all
@@ -44,7 +54,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(triggers);
   } catch (error) {
-    console.error("GET /api/mss/workflows/triggers error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
@@ -75,7 +84,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "workflow not found" }, { status: 404 });
     }
 
-    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+    // Look up the user's company for ownership verification
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
+    if (workflow.companyId && workflow.companyId !== userCompanyId && session.role !== "admin") {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
@@ -97,7 +117,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json(trigger, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/triggers error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 // POST /api/mss/workflows/runs — Create a new workflow run with session
-export async function POSTcreate(req: Request) {
+export async function POST(req: Request) {
   try {
     const session = await getSession();
     if (!session) {
@@ -87,7 +87,6 @@ export async function POSTcreate(req: Request) {
       sessionId: mssSession.id,
     }, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/runs error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
@@ -168,7 +167,6 @@ export async function POSTretry(req: Request, { params }: { params: { id: string
 
     return NextResponse.json(newRun, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/runs/[id]/retry error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

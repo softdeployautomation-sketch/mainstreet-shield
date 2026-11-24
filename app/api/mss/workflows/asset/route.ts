@@ -18,11 +18,22 @@ export async function POST(req: Request) {
       );
     }
 
+    // Look up the user's company for ownership verification
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
     // Find the asset and verify ownership
     const asset = await db.companyAsset.findFirst({
       where: {
         id: assetId,
-        companyId: session.userId,
+        companyId: userCompanyId,
       },
     });
 
@@ -41,7 +52,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json(updatedAsset, { status: 200 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/asset/status error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
@@ -62,11 +72,22 @@ export async function priority(req: Request) {
       );
     }
 
+    // Look up the user's company for ownership verification
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
     // Find the asset and verify ownership
     const asset = await db.companyAsset.findFirst({
       where: {
         id: assetId,
-        companyId: session.userId,
+        companyId: userCompanyId,
       },
     });
 
@@ -82,7 +103,6 @@ export async function priority(req: Request) {
 
     return NextResponse.json(updatedAsset, { status: 200 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/asset/priority error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

@@ -27,7 +27,17 @@ export async function POST(
     }
 
     // Check company boundary
-    if (run.workflow.companyId && run.workflow.companyId !== session.userId && session.role !== "admin") {
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
+    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId && session.role !== "admin") {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
@@ -43,7 +53,6 @@ export async function POST(
 
     return NextResponse.json(skippedRun);
   } catch (error) {
-    console.error("POST /api/mss/workflows/runs/[id]/skip error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

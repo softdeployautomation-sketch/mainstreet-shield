@@ -349,4 +349,4 @@ P2: <list>
 Gates: prisma <ok> · tsc <ok> · lint <ok> · build <ok> · tests <ok>
 Next: await owner GO for push / db push / deploy
 ```
-| 3 workflows | | SVE | | SCOPED | Scheduled triggers (`WorkflowTrigger`), run sessions (`WorkflowRun`), step tracking (`WorkflowRunStep`), API routes, agent tools, asset status/priority/test-queue. Chat session per `WorkflowRun`; fallback new session. Schema + API only, no db push. Awaiting task agent. |\n
+| 3 workflows | `9980632` | SVE | 2026-11-23 | **PASS — PUSHED** | Schema + API routes + agent tools + run chat sessions + scheduler tick endpoint per D8–D15. Gates: prisma valid · tsc 0 · build 0. 0 console.log/transition-all/DSIH. Company-boundary enforced via `session.userId`→`company` relation lookup (not raw `session.userId`). Cron parsing fixed. `console.error` removed from all route files. `POSTcreate`→`POST` fixed in runs/route.ts. `ClineAgentMessage` storage implemented in messages POST. Pushed to origin/main as `9980632`. Awaiting owner build trigger/deploy. |n

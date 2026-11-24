@@ -16,6 +16,17 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "runId is required" }, { status: 400 });
     }
 
+    // Look up the user's company for ownership verification
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
     // Check ownership - get the run and its workflow
     const run = await db.workflowRun.findUnique({
       where: { id: runId },
@@ -30,9 +41,14 @@ export async function GET(req: Request) {
     }
 
     // Check company boundary
-    if (run.workflow.companyId && run.workflow.companyId !== session.userId && session.role !== "admin") {
+    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId && session.role !== "admin") {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
+
+    // Count actual messages for this session
+    const messageCount = run.sessionId
+      ? await db.clineAgentMessage.count({ where: { sessionId: run.sessionId } })
+      : 0;
 
     // Return session info and message count
     return NextResponse.json({
@@ -40,10 +56,9 @@ export async function GET(req: Request) {
       sessionId: run.sessionId,
       workflowName: run.workflow.name,
       title: run.session?.title,
-      messageCount: 0,
+      messageCount,
     });
   } catch (error) {
-    console.error("GET /api/mss/workflows/runs/[runId]/messages error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
@@ -64,6 +79,17 @@ export async function POST(req: Request) {
       );
     }
 
+    // Look up the user's company for ownership verification
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
     // Check the run exists and get ownership
     const run = await db.workflowRun.findUnique({
       where: { id: runId },
@@ -78,19 +104,32 @@ export async function POST(req: Request) {
     }
 
     // Check company boundary
-    if (run.workflow.companyId && run.workflow.companyId !== session.userId && session.role !== "admin") {
+    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId && session.role !== "admin") {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
-    // Store the message - for now, return success
-    // In a full implementation, we'd have a ClineAgentMessage model
+    // Store the message as ClineAgentMessage
+    const targetSessionId = run.sessionId;
+    if (!targetSessionId) {
+      return NextResponse.json({ error: "run has no linked session" }, { status: 400 });
+    }
+
+    const content = typeof message === "string" ? { text: message } : message;
+
+    await db.clineAgentMessage.create({
+      data: {
+        sessionId: targetSessionId,
+        userId: session.userId,
+        role: "user",
+        content,
+      },
+    });
 
     return NextResponse.json({
       runId,
       status: "message stored",
     }, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/runs/[runId]/messages error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

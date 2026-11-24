@@ -229,7 +229,7 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 5. **Cline auth mid-session fix — commit `6b679b3`** — PUSHED to origin/main. Force-refreshes OAuth token on 401 during `core.start()`/`core.send()` and retries once. Prevents "Unauthorized ... re-authenticate" mid-scan. tsc 0 · build success · 0 console.log/transition-all/DSIH. Awaiting owner build trigger/deploy.
 6. **Batch 2 memory — PUSHED — `afb05d8`.** Evidence-gated Postgres graph (MemoryNode/MemoryEdge/MemoryReview) per D18–D24. Schema + API only, no db push. Committed locally then pushed to origin/main. Gates: prisma valid · tsc 0 · build 0. Awaiting owner build trigger/deploy.
 
-7. **Batch 3 workflows — SCOPED.** Prompt at `task/TASK_258_SVE_BATCH3_WORKFLOWS_PROMPT.md`. Scheduled triggers (`WorkflowTrigger`), run sessions (`WorkflowRun`), step tracking (`WorkflowRunStep`), API routes, agent tools, asset status/priority/test-queue. Chat session per `WorkflowRun`; fallback new session. Schema + API only, no db push. Awaiting task agent.
+7. **Batch 3b workflows runtime — SCOPED + implemented.** Schema + API routes + agent tools + run chat sessions + scheduler tick endpoint. Gates: prisma valid · tsc 0 · build 0. Committed locally, awaiting owner push/deploy.
 
 
 ---
@@ -251,7 +251,7 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 | 2026-11-23 | **MAINSTREET_SERVICE_TOKEN ROTATED** on VPS 207.244.224.57 — old token removed from `/opt/mainstreet-shield/.env`, `/opt/spaceworker/.env` (all three token variables). Both `mainstreet-shield.service` and `spaceworker.service` restarted and active. | SVE |
 | 2026-11-23 | **WP6.8 Chat UI fixes DEPLOYED — commit `98d3c7f`** | Stop button clickable while sending, auto-scroll stops when user scrolls up, Thinking INPUT populated, final thinking chunk included, stream abort via AbortController, tool input/output shows "—" when empty. tsc 0 · build success · 0 console.log/transition-all/DSIH. Deployed via GitHub Actions. | SVE |
 | 2026-11-23 | **Cline auth mid-session fix committed locally — `6b679b3`** | Force-refreshes OAuth token on 401 during `core.start()`/`core.send()` and retries once. Prevents "Unauthorized ... re-authenticate" mid-scan. tsc 0 · build success · 0 console.log/transition-all/DSIH. Awaiting owner push/deploy. | SVE |
-| 2026-11-23 | **Cline auth mid-session fix PUSHED — commit `6b679b3`** | Force-refreshes OAuth token on 401 during `core.start()`/`core.send()` and retries once. Prevents "Unauthorized ... re-authenticate" mid-scan. tsc 0 · build success · 0 console.log/transition-all/DSIH. Pushed to origin/main. Awaiting owner build trigger/deploy. | SVE |
+| 2026-11-23 | **Batch 3b workflows runtime — SCOPED + implemented.** Schema + API routes + agent tools + run chat sessions + scheduler tick endpoint. Gates: prisma valid · tsc 0 · build 0. Committed locally, awaiting owner push/deploy. | SVE |
 
 ---
 

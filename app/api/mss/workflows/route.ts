@@ -22,7 +22,17 @@ export async function GET(req: Request) {
       where.companyId = companyId;
     } else if (session.role !== "admin") {
       // Non-admin agents only see their own company's workflows or global (NULL) workflows
-      where.companyId = session.userId;
+      const user = await db.user.findUnique({
+        where: { id: session.userId },
+        include: { company: true },
+      });
+      const userCompanyId = user?.company?.id;
+
+      if (!userCompanyId) {
+        return NextResponse.json({ error: "user has no company" }, { status: 403 });
+      }
+
+      where.companyId = userCompanyId;
     }
     // admin sees all (companyId can be NULL or specific)
 
@@ -58,7 +68,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(workflows);
   } catch (error) {
-    console.error("GET /api/mss/workflows error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
@@ -81,9 +90,19 @@ export async function POST(req: Request) {
     }
 
     // Determine companyId
-    let workflowCompanyId: string = session.userId; // default to agent's own company
+    let workflowCompanyId: string;
     if (session.role === "admin") {
-      workflowCompanyId = companyId || session.userId;
+      workflowCompanyId = companyId || "";
+    } else {
+      const user = await db.user.findUnique({
+        where: { id: session.userId },
+        include: { company: true },
+      });
+      workflowCompanyId = user?.company?.id || "";
+    }
+
+    if (!workflowCompanyId) {
+      return NextResponse.json({ error: "no company for workflow" }, { status: 403 });
     }
 
     // Create workflow (starts as "draft" status, triggerCount defaults to 0)
@@ -128,7 +147,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json(workflow, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/workflows error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

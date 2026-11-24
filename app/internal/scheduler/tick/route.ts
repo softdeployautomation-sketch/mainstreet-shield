@@ -15,10 +15,10 @@ function computeNextRun(cron: string, lastRunAt: Date): Date {
     return next;
   }
 
-  const [, minute, hour, dayOfMonth, month, dayOfWeek] = match.map(m => parseInt(m, 10));
+  const [, minute, hour, dayOfWeek] = match.map(m => m === '*' ? null : parseInt(m, 10));
 
   const next = new Date(lastRunAt);
-  next.setHours(hour, minute || 0, 0, 0);
+  next.setHours((hour ?? 0), (minute ?? 0), 0, 0);
 
   // If the computed time is in the past or now, move to the next day
   if (next <= lastRunAt) {
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
       const sessionTitle = `Workflow run ${run.id} — ${trigger.workflow.name}`;
       const mssSession = await db.mssAgentSession.create({
         data: {
-          userId: trigger.workflow.companyId || "",
+          userId: trigger.workflow.createdById || "",
           title: sessionTitle,
           status: "active",
         },
@@ -128,7 +128,6 @@ export async function POST(req: Request) {
       count: runsCreated.length,
     });
   } catch (error) {
-    console.error("POST /api/internal/scheduler/tick error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

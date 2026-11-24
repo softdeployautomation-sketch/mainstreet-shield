@@ -30,7 +30,17 @@ export async function POST(
     }
 
     // Check company boundary
-    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      include: { company: true },
+    });
+    const userCompanyId = user?.company?.id;
+
+    if (!userCompanyId) {
+      return NextResponse.json({ error: "user has no company" }, { status: 403 });
+    }
+
+    if (workflow.companyId && workflow.companyId !== userCompanyId && session.role !== "admin") {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
@@ -66,9 +76,24 @@ export async function POST(
       },
     });
 
+    // Create an MssAgentSession linked to this run
+    const sessionTitle = `Workflow run ${run.id} — ${workflow.name}`;
+    const mssSession = await db.mssAgentSession.create({
+      data: {
+        userId: session.userId,
+        title: sessionTitle,
+        status: "active",
+      },
+    });
+
+    // Update the run with the session ID
+    await db.workflowRun.update({
+      where: { id: run.id },
+      data: { sessionId: mssSession.id },
+    });
+
     return NextResponse.json(run, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/workflows/[id]/run error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
