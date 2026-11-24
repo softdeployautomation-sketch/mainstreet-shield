@@ -2,32 +2,7 @@ import { db } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { startClineSession } from "@/lib/clin/cline-session";
-
-const CRON_PATTERN = /^(\d+|\*)\s+(\d+|\*)\s+\*\s+\*\s+(\d+|\*)$/;
-
-// Compute next run time from cron expression, given lastRunAt
-function computeNextRun(cron: string, lastRunAt: Date): Date {
-  // Simple daily cron parsing: "0 HH * * *" means every day at hour HH
-  const match = cron.match(CRON_PATTERN);
-  if (!match) {
-    // Fallback: return 24 hours from lastRunAt
-    const next = new Date(lastRunAt);
-    next.setHours(next.getHours() + 24);
-    return next;
-  }
-
-  const [, minute, hour, dayOfWeek] = match.map(m => m === '*' ? null : parseInt(m, 10));
-
-  const next = new Date(lastRunAt);
-  next.setHours((hour ?? 0), (minute ?? 0), 0, 0);
-
-  // If the computed time is in the past or now, move to the next day
-  if (next <= lastRunAt) {
-    next.setDate(next.getDate() + 1);
-  }
-
-  return next;
-}
+import { nextRunAt } from "@/lib/workflows/cron";
 
 export const runtime = "nodejs";
 export async function POST(req: Request) {
@@ -75,10 +50,10 @@ export async function POST(req: Request) {
       // Skip non-active workflows (draft, archived, etc.)
       if (trigger.workflow.status !== "active") {
         // Still update nextRunAt so they can be re-enabled later
-        const nextRunAt = computeNextRun(trigger.cron, now);
+        const computedNext = nextRunAt(trigger.cron, now) ?? now;
         await db.workflowTrigger.update({
           where: { id: trigger.id },
-          data: { nextRunAt },
+          data: { nextRunAt: computedNext },
         });
         continue;
       }
@@ -93,14 +68,14 @@ export async function POST(req: Request) {
       }
 
       // Compute next run time
-      const nextRunAt = computeNextRun(trigger.cron, now);
+      const computedNext = nextRunAt(trigger.cron, now) ?? now;
 
       // Create workflow run (manual-like but with triggerId)
       const run = await db.workflowRun.create({
         data: {
           workflowId: trigger.workflowId,
           triggerId: trigger.id,
-          status: "pending",
+          status: "running",
           startedAt: now,
         },
         include: {
@@ -143,18 +118,56 @@ export async function POST(req: Request) {
       });
 
       // Kick off the agent by starting a ClineCore session
+      let runStatus: "completed" | "failed" | "needs_human" = "completed";
+      let stepStatus: "completed" | "failed" | "needs_human" = "completed";
+      let stepError: string | null = null;
+
       try {
-        await startClineSession({
+        const result = await startClineSession({
           sessionId: mssSession.id,
           userId: trigger.workflow.createdById || "",
           prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule (one-time). No workflow steps are defined — you have full authority to decide the next action based on available context. If human confirmation is needed, trigger a Telegram notification.`,
           resume: true,
         });
-      } catch {
-        // Non-fatal: the run/step already exist, the user can still open the chat.
+
+        if (result.status !== "completed") {
+          runStatus = result.error === "cline_disconnected" ? "needs_human" : "failed";
+          stepStatus = runStatus;
+        }
+      } catch (err) {
+        runStatus = "failed";
+        stepStatus = "failed";
+        stepError = err instanceof Error ? err.message : "startClineSession failed";
       }
 
+      const endedAt = new Date();
+
+      // Update step and run with final status
+      await db.workflowRunStep.update({
+        where: { id: (await db.workflowRunStep.findFirst({
+          where: { runId: run.id, name: "agent_prompt" },
+          select: { id: true },
+        }))!.id },
+        data: {
+          status: stepStatus,
+          startedAt: now,
+          endedAt,
+          error: stepError,
+          needsHuman: runStatus === "needs_human",
+        },
+      });
+
+      await db.workflowRun.update({
+        where: { id: run.id },
+        data: {
+          status: runStatus,
+          endedAt,
+        },
+      });
+
       // Claim atomically: update trigger with lastRunAt, runsDone increment, nextRunAt
+      // For one-time triggers (maxRuns: 1), don't set nextRunAt — trigger will be disabled
+      const isLastRun = trigger.maxRuns !== -1 && trigger.runsDone + 1 >= trigger.maxRuns;
       const claimed = await db.workflowTrigger.updateMany({
         where: {
           id: trigger.id,
@@ -164,9 +177,13 @@ export async function POST(req: Request) {
         data: {
           lastRunAt: now,
           runsDone: { increment: 1 },
-          nextRunAt,
+          ...(isLastRun ? {} : { nextRunAt: computedNext }),
         },
       });
+
+      if (claimed.count === 0) {
+        continue;
+      }
 
       if (claimed.count === 0) {
         continue;

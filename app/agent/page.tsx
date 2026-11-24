@@ -11,155 +11,98 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default async function AgentPage() {
+export default async function AgentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ session?: string }>;
+}) {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  // S0-2: require password — redirect to Settings to create one
   const pw = await requirePasswordUser(session);
   if (!pw.user) redirect("/login");
   if (pw.needPassword) redirect("/settings?need-password=1");
 
   if (session.tier !== "3" && session.tier !== "5" && session.role !== "admin") redirect("/settings");
 
-  const company = await db.company.findUnique({
-    where: { userId: session.userId },
-    include: { assets: true },
-  });
+  const { session: sessionId } = await searchParams;
 
-  const vms = await db.shieldLinuxVM.findMany({
-    where: { userId: session.userId },
-  });
+  let mssSession: { id: string; userId: string; title: string | null; status: string; createdAt: Date } | null = null;
+  let run: { id: string; workflowId: string; triggerId: string | null; status: string; startedAt: Date | null; endedAt: Date | null } | null = null;
+  let steps: { id: string; name: string; type: string; status: string; input: any; output: any | null; startedAt: Date | null; endedAt: Date | null; error: string | null }[] = [];
+  let workflowName = "";
+  let agentPrompt = "";
+
+  if (sessionId) {
+    mssSession = await db.mssAgentSession.findUnique({ where: { id: sessionId } });
+    if (mssSession) {
+      run = await db.workflowRun.findFirst({ where: { sessionId: mssSession.id } });
+      if (run) {
+        const wf = await db.workflow.findUnique({ where: { id: run.workflowId }, select: { name: true, agentPrompt: true } });
+        if (wf) { workflowName = wf.name; agentPrompt = wf.agentPrompt ?? ""; }
+        steps = await db.workflowRunStep.findMany({ where: { runId: run.id }, orderBy: { id: "asc" } });
+      }
+    }
+  }
 
   return (
     <div className="flex flex-col h-full gap-4 p-4 bg-bg text-fg">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Link
-            href="/dashboard"
-            className="text-xs font-mono text-fg-muted hover:text-fg"
-          >
-            ← Back
-          </Link>
+          <Link href="/dashboard" className="text-xs font-mono text-fg-muted hover:text-fg">← Back</Link>
           <span className="text-emerald-400 font-mono text-sm">›_</span>
           <h1 className="text-xl font-semibold">Agent</h1>
         </div>
-        <div>
-          <p className="text-xs text-fg-muted mt-1">
-            MSS Agent — assist or full-control bug hunting
-          </p>
-        </div>
+        <div><p className="text-xs text-fg-muted mt-1">MSS Agent — workflow run conversation</p></div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Mode selector */}
-        <div className="lg:col-span-1 bg-bg-elevated rounded-xl border border-border p-6">
-          <h2 className="text-sm font-semibold text-fg-muted mb-4">Mode</h2>
-          <div className="space-y-3">
-            <button
-              className="w-full flex items-center justify-between p-3 rounded border border-border bg-bg hover:bg-bg-elevated"
-            >
-              <div>
-                <div className="text-sm font-medium text-fg">Assist Mode</div>
-                <div className="text-xs text-fg-muted">
-                  Agent suggests actions, you approve each one
-                </div>
+      {sessionId && mssSession ? (
+        <>
+          <div className="bg-bg-elevated rounded-xl border border-border p-4 mb-4">
+            <div className="flex flex-col gap-2">
+              <div className="text-xs font-mono text-fg-muted uppercase tracking-wider mb-1">Run: {run?.id ?? "—"}</div>
+              <div className="text-sm font-mono text-fg">{workflowName}</div>
+              <div className="flex items-center gap-4 text-xs font-mono text-fg-muted">
+                <span>Status: {run?.status ?? "—"}</span>
+                <span>Started: {run?.startedAt ? new Date(run.startedAt).toLocaleString() : "—"}</span>
+                {run?.endedAt && <span>Ended: {new Date(run.endedAt).toLocaleString()}</span>}
               </div>
-              <span className="text-xs text-fg-muted">Human-in-loop</span>
-            </button>
-            <button
-              className="w-full flex items-center justify-between p-3 rounded border border-emerald-500/30 bg-emerald-500/10"
-            >
-              <div>
-                <div className="text-sm font-medium text-emerald-400">
-                  Full Control Mode
-                </div>
-                <div className="text-xs text-emerald-400/70">
-                  Agent plans and executes autonomously
-                </div>
-              </div>
-              <span className="text-xs text-emerald-400">Autonomous</span>
-            </button>
+            </div>
           </div>
-        </div>
 
-        {/* Targets */}
-        <div className="lg:col-span-1 bg-bg-elevated rounded-xl border border-border p-6">
-          <h2 className="text-sm font-semibold text-fg-muted mb-4">Targets</h2>
-          <div className="space-y-2">
-            {company?.assets?.map((a: any) => (
-              <div key={a.id} className="flex items-center justify-between p-2 rounded border border-border bg-bg-elevated/50">
-                <div>
-                  <div className="text-sm text-fg">{a.name}</div>
-                  <div className="text-xs text-fg-muted font-mono">
-                    {a.target}
+          <div className="flex-1 bg-bg-elevated rounded-xl border border-border p-6 flex flex-col">
+            <h2 className="text-sm font-semibold text-fg-muted mb-4">Conversation</h2>
+            <div className="flex-1 overflow-y-auto bg-bg rounded border border-border p-4 font-mono text-xs space-y-4">
+              {agentPrompt ? (
+                <div className="flex flex-col gap-2">
+                  <div className="text-[10px] font-mono text-fg-muted uppercase mb-1">Agent Prompt</div>
+                  <div className="bg-bg-elevated/50 p-3 rounded border border-border/30 whitespace-pre-wrap text-fg">{agentPrompt}</div>
+                </div>
+              ) : (
+                <div className="text-fg-muted italic">No agent prompt available.</div>
+              )}
+              {steps.length > 0 ? (
+                steps.map((step) => (
+                  <div key={step.id} className="flex flex-col gap-2 pt-2 border-t border-border/30">
+                    <div className="text-[10px] font-mono text-fg-muted uppercase mb-1">{step.name}</div>
+                    <div className="text-xs text-fg-muted font-mono mb-1">{step.type} · {step.status}{step.startedAt ? ` · started ${new Date(step.startedAt).toLocaleString()}` : ""}{step.endedAt ? ` · ended ${new Date(step.endedAt).toLocaleString()}` : ""}</div>
+                    {step.input && <div className="text-sm text-fg whitespace-pre-wrap">{typeof step.input === "string" ? step.input : JSON.stringify(step.input, null, 2)}</div>}
+                    {step.output && <div className="text-sm text-emerald-400 whitespace-pre-wrap mt-1">{typeof step.output === "string" ? step.output : JSON.stringify(step.output, null, 2)}</div>}
+                    {step.error && <div className="text-sm text-rose-400 whitespace-pre-wrap mt-1">Error: {step.error}</div>}
                   </div>
-                </div>
-                <span
-                  className={`px-2 py-0.5 rounded text-xs ${
-                    a.inScope
-                      ? "text-emerald-400 bg-emerald-500/10"
-                      : "text-fg-muted bg-border/30"
-                  }`}
-                >
-                  {a.inScope ? "In scope" : "Out"}
-                </span>
-              </div>
-            ))}
-            {company?.assets?.length === 0 && (
-              <p className="text-xs text-fg-muted italic">No assets defined</p>
-            )}
+                ))
+              ) : (
+                <div className="text-fg-muted italic">No steps recorded yet.</div>
+              )}
+            </div>
           </div>
+        </>
+      ) : (
+        <div className="bg-bg-elevated rounded-xl border border-border p-8 text-center">
+          <h2 className="text-sm font-semibold text-fg-muted uppercase tracking-wider mb-2">Agent</h2>
+          <p className="text-sm text-fg-muted">No session specified. Open a chat from a workflow run to view the conversation.</p>
         </div>
-
-        {/* VM status */}
-        <div className="lg:col-span-1 bg-bg-elevated rounded-xl border border-border p-6">
-          <h2 className="text-sm font-semibold text-fg-muted mb-4">Lab VM</h2>
-          <div className="space-y-2">
-            {vms.map((vm: any) => (
-              <div key={vm.id} className="p-3 rounded border border-border bg-bg-elevated/50">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm text-fg">{vm.label}</span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs ${
-                      vm.state === "running"
-                        ? "text-emerald-400 bg-emerald-500/10"
-                        : "text-fg-muted bg-border/30"
-                    }`}
-                  >
-                    {vm.state}
-                  </span>
-                </div>
-                <div className="text-xs text-fg-muted">
-                  {vm.ramMb}MB · {vm.vcpu} vCPU · {vm.diskGb}GB
-                </div>
-              </div>
-            ))}
-            {vms.length === 0 && (
-              <p className="text-xs text-fg-muted italic">No VM provisioned</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Agent terminal */}
-      <div className="flex-1 bg-bg-elevated rounded-xl border border-border p-6">
-        <h2 className="text-sm font-semibold text-fg-muted mb-4">
-          Agent Terminal
-        </h2>
-        <div className="bg-bg rounded border border-border p-3 font-mono text-xs h-64 overflow-y-auto">
-          <div className="text-fg-muted mb-2">›_ Waiting for target selection…</div>
-          <div className="text-emerald-400/50">
-            Select a target above, then the agent can:
-          </div>
-          <ul className="text-fg-muted text-xs mt-2 space-y-1 list-disc list-inside">
-            <li>Plan recon and enumeration steps</li>
-            <li>Request approval before each action</li>
-            <li>Run against attested targets only</li>
-            <li>Record evidence in context doc</li>
-          </ul>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
