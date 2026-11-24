@@ -33,13 +33,15 @@ export async function POST(req: Request) {
     }
 
     // Check ownership: agent's company must match workflow's company, or admin
-    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
+
+    if (!userCompanyId || (workflow.companyId && workflow.companyId !== userCompanyId)) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
     // Determine the companyId for cap enforcement
-    // Non-admin agents use the workflow's company; admins can use their own userId
-    const targetCompanyId = session.role === "admin" ? (session.userId || workflow.companyId) : workflow.companyId || session.userId;
+    const targetCompanyId = userCompanyId;
 
     // Enforce cap: max 5 active triggers per company
     const triggersUnderCompany = await db.workflowTrigger.count({

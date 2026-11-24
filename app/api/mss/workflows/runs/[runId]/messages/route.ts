@@ -17,11 +17,8 @@ export async function GET(req: Request) {
     }
 
     // Look up the user's company for ownership verification
-    const user = await db.user.findUnique({
-      where: { id: session.userId },
-      include: { company: true },
-    });
-    const userCompanyId = user?.company?.id;
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
 
     if (!userCompanyId) {
       return NextResponse.json({ error: "user has no company" }, { status: 403 });
@@ -41,7 +38,7 @@ export async function GET(req: Request) {
     }
 
     // Check company boundary
-    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId && session.role !== "admin") {
+    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
@@ -80,11 +77,8 @@ export async function POST(req: Request) {
     }
 
     // Look up the user's company for ownership verification
-    const user = await db.user.findUnique({
-      where: { id: session.userId },
-      include: { company: true },
-    });
-    const userCompanyId = user?.company?.id;
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
 
     if (!userCompanyId) {
       return NextResponse.json({ error: "user has no company" }, { status: 403 });
@@ -104,7 +98,7 @@ export async function POST(req: Request) {
     }
 
     // Check company boundary
-    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId && session.role !== "admin") {
+    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 

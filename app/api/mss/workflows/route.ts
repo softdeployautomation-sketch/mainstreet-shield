@@ -177,7 +177,10 @@ export async function PUT(req: Request) {
     }
 
     // Check ownership
-    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
+
+    if (!userCompanyId || (workflow.companyId && workflow.companyId !== userCompanyId)) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
@@ -223,7 +226,10 @@ export async function DELETE(req: Request) {
     }
 
     // Check ownership
-    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
+
+    if (!userCompanyId || (workflow.companyId && workflow.companyId !== userCompanyId)) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 

@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 // POST /api/mss/workflows/runs/[id]/skip — Skip a pending workflow run
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getSession();
@@ -13,7 +13,7 @@ export async function POST(
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
 
-    const { id } = params;
+    const { id } = await params;
 
     const run = await db.workflowRun.findUnique({
       where: { id },
@@ -27,17 +27,10 @@ export async function POST(
     }
 
     // Check company boundary
-    const user = await db.user.findUnique({
-      where: { id: session.userId },
-      include: { company: true },
-    });
-    const userCompanyId = user?.company?.id;
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
 
-    if (!userCompanyId) {
-      return NextResponse.json({ error: "user has no company" }, { status: 403 });
-    }
-
-    if (run.workflow.companyId && run.workflow.companyId !== userCompanyId && session.role !== "admin") {
+    if (!userCompanyId || (run.workflow.companyId && run.workflow.companyId !== userCompanyId)) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 

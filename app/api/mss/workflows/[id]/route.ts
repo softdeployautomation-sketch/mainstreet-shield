@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 // GET /api/mss/workflows/[id] — Workflow detail
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getSession();
@@ -13,7 +13,7 @@ export async function GET(
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
 
-    const { id } = params;
+    const { id } = await params;
 
     const workflow = await db.workflow.findUnique({
       where: { id },
@@ -38,17 +38,10 @@ export async function GET(
     }
 
     // Check company boundary
-    const user = await db.user.findUnique({
-      where: { id: session.userId },
-      include: { company: true },
-    });
-    const userCompanyId = user?.company?.id;
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
 
-    if (!userCompanyId) {
-      return NextResponse.json({ error: "user has no company" }, { status: 403 });
-    }
-
-    if (workflow.companyId && workflow.companyId !== userCompanyId && session.role !== "admin") {
+    if (!userCompanyId || (workflow.companyId && workflow.companyId !== userCompanyId)) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
@@ -61,7 +54,7 @@ export async function GET(
 // POST /api/mss/workflows/[id] — Update workflow
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getSession();
@@ -69,7 +62,7 @@ export async function POST(
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
 
-    const { id } = params;
+    const { id } = await params;
     const { name, description, status } = await req.json();
 
     const workflow = await db.workflow.findUnique({
@@ -81,17 +74,10 @@ export async function POST(
     }
 
     // Check company boundary
-    const user = await db.user.findUnique({
-      where: { id: session.userId },
-      include: { company: true },
-    });
-    const userCompanyId = user?.company?.id;
+    const userCompany = await db.company.findUnique({ where: { userId: session.userId } });
+    const userCompanyId = userCompany?.id ?? null;
 
-    if (!userCompanyId) {
-      return NextResponse.json({ error: "user has no company" }, { status: 403 });
-    }
-
-    if (workflow.companyId && workflow.companyId !== userCompanyId && session.role !== "admin") {
+    if (!userCompanyId || (workflow.companyId && workflow.companyId !== userCompanyId)) {
       return NextResponse.json({ error: "access denied" }, { status: 403 });
     }
 
