@@ -66,6 +66,14 @@ export const MSS_TOOL_DOCS = `MSS-specific tools:
 - mss_list_facts — List recorded facts for a scan task. Input: { taskId }. Verifies ownership (C1), returns AgentFinding rows recorded via mss_record_fact. Returns { facts: [...] }.
 - mss_list_companies — List all companies (admin). Input: {}. Non-admin users see only their own company. Returns { companies: [...] }.
 
+Memory tools (company-scoped):
+- mss_remember — Upsert a memory node for the user's company. Input: { key, label, type, summary?, confidence? }. Returns { ok, node }.
+- mss_recall — Query memory nodes for the user's company. Input: { query?, type?, limit? }. Case-insensitive contains on key/label/summary, newest first. Returns { nodes }.
+- mss_link_memory — Create a hypothesis edge between two memory nodes. Input: { fromKey, toKey, type, evidence?, confidence? }. Edge status is always 'hypothesis'. Returns { ok, edge }.
+- mss_note_outcome — Append evidence/rationale to a hypothesis edge. Agent may NOT set status 'confirmed'. Input: { edgeId, outcome, rationale? }. Returns { ok: true, requires: 'human confirmation' }.
+- mss_list_hypotheses — List company memory edges with status 'hypothesis' (latest 50). Input: {}. Returns { edges }.
+- mss_propose_playbook — Propose a playbook memory node for admin approval. Input: { key, label, summary, type? }. Creates company MemoryNode with authority 'agent', source 'proposed_playbook', confidence 0.3. Returns { ok, node, requires: 'admin approval' }.
+
 
 Asset write tools (MainStreet company DB):
 - create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset" or "add 164.68.105.96 as an asset"). Target can be a hostname, IP address, URL, or any identifier — no URL validation is applied.

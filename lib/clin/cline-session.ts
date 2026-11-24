@@ -3511,9 +3511,197 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
       },
     },
 
+    // B-11: mss_remember
+    {
+      name: "mss_remember",
+      description:
+        "Upsert a memory node for the user's company. Input: { key, label, type, summary?, confidence? }. Creates or updates MemoryNode on (key, companyId) with authority 'agent'. Returns { ok, node }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "Unique slug within the tenant" },
+          label: { type: "string", description: "Human-readable label" },
+          type: { type: "string", description: '"ip" | "domain" | "port" | "service" | "vuln" | "finding" | "tactic" | "technique"' },
+          summary: { type: "string", description: "Optional summary" },
+          confidence: { type: "number", description: "Confidence 0..1 (default 0.5)" },
+        },
+        required: ["key", "label", "type"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { key, label, type, summary, confidence } = input as { key: string; label: string; type: string; summary?: string; confidence?: number };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const conf = typeof confidence === "number" ? Math.min(1, Math.max(0, confidence)) : 0.5;
+        const node = await db.memoryNode.upsert({
+          where: { key_companyId: { key, companyId: company.id } },
+          update: { label, type, summary, confidence: conf, authority: "agent", updatedAt: new Date() },
+          create: { key, label, type, summary, confidence: conf, authority: "agent", companyId: company.id, createdById: userId },
+        });
+        return { ok: true, node };
+      },
+    },
+
+    // B-11: mss_recall
+    {
+      name: "mss_recall",
+      description:
+        "Query memory nodes for the user's company. Input: { query?, type?, limit? }. Case-insensitive contains on key/label/summary, newest first, limit clamped 1..50.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Optional search substring" },
+          type: { type: "string", description: "Optional node type filter" },
+          limit: { type: "number", description: "Max results (1..50, default 10)" },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { query, type, limit } = input as { query?: string; type?: string; limit?: number };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const take = typeof limit === "number" ? Math.min(50, Math.max(1, limit)) : 10;
+        const where: any = { companyId: company.id };
+        if (type) where.type = type;
+        if (query) {
+          where.OR = [
+            { key: { contains: query, mode: "insensitive" } },
+            { label: { contains: query, mode: "insensitive" } },
+            { summary: { contains: query, mode: "insensitive" } },
+          ];
+        }
+        const nodes = await db.memoryNode.findMany({ where, orderBy: { createdAt: "desc" }, take });
+        return { nodes };
+      },
+    },
+
+    // B-11: mss_link_memory
+    {
+      name: "mss_link_memory",
+      description:
+        "Create a hypothesis edge between two memory nodes. Input: { fromKey, toKey, type, evidence?, confidence? }. Edge status is always 'hypothesis'. Returns { ok, edge }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          fromKey: { type: "string", description: "Source node key" },
+          toKey: { type: "string", description: "Target node key" },
+          type: { type: "string", description: '"leads_to" | "exposes" | "mitigates" | "related_to" | "evidence_for"' },
+          evidence: { type: "string", description: "Optional evidence text" },
+          confidence: { type: "number", description: "Confidence 0..1 (default 0.5)" },
+        },
+        required: ["fromKey", "toKey", "type"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { fromKey, toKey, type, evidence, confidence } = input as { fromKey: string; toKey: string; type: string; evidence?: string; confidence?: number };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const fromNode = await db.memoryNode.findUnique({ where: { key_companyId: { key: fromKey, companyId: company.id } } });
+        const toNode = await db.memoryNode.findUnique({ where: { key_companyId: { key: toKey, companyId: company.id } } });
+        if (!fromNode || !toNode) return { error: "node_not_found" };
+        const conf = typeof confidence === "number" ? Math.min(1, Math.max(0, confidence)) : 0.5;
+        const edge = await db.memoryEdge.create({
+          data: { fromKey, toKey, type, evidence, confidence: conf, status: "hypothesis", companyId: company.id, createdById: userId },
+        });
+        return { ok: true, edge };
+      },
+    },
+
+    // B-11: mss_note_outcome
+    {
+      name: "mss_note_outcome",
+      description:
+        "Append evidence/rationale to a hypothesis edge. Agent may NOT set status 'confirmed'. Input: { edgeId, outcome, rationale? }. Returns { ok: true, requires: 'human confirmation' }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          edgeId: { type: "string", description: "MemoryEdge id" },
+          outcome: { type: "string", description: "Outcome text appended as evidence" },
+          rationale: { type: "string", description: "Optional rationale" },
+        },
+        required: ["edgeId", "outcome"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { edgeId, outcome, rationale } = input as { edgeId: string; outcome: string; rationale?: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const edge = await db.memoryEdge.findUnique({ where: { id: edgeId } });
+        if (!edge) return { error: "edge_not_found" };
+        if (edge.companyId !== company.id) return { error: "access denied" };
+        const existingEvidence = edge.evidence ?? "";
+        const appended = existingEvidence
+          ? `${existingEvidence}\n--- Agent outcome: ${outcome}${rationale ? ` | rationale: ${rationale}` : ""}`
+          : `Agent outcome: ${outcome}${rationale ? ` | rationale: ${rationale}` : ""}`;
+        await db.memoryEdge.update({
+          where: { id: edgeId },
+          data: { evidence: appended },
+        });
+        return { ok: true, requires: "human confirmation" };
+      },
+    },
+
+    // B-11: mss_list_hypotheses
+    {
+      name: "mss_list_hypotheses",
+      description:
+        "List company memory edges with status 'hypothesis' (latest 50). Input: {}.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const edges = await db.memoryEdge.findMany({
+          where: { companyId: company.id, status: "hypothesis" },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        });
+        return { edges };
+      },
+    },
+
+    // B-11: mss_propose_playbook
+    {
+      name: "mss_propose_playbook",
+      description:
+        "Propose a playbook memory node for admin approval. Input: { key, label, summary, type? }. Creates company MemoryNode with authority 'agent', source 'proposed_playbook', confidence 0.3. Never global. Returns { ok, node, requires: 'admin approval' }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "Unique slug within the tenant" },
+          label: { type: "string", description: "Human-readable label" },
+          summary: { type: "string", description: "Playbook summary" },
+          type: { type: "string", description: '"ip" | "domain" | "port" | "service" | "vuln" | "finding" | "tactic" | "technique"' },
+        },
+        required: ["key", "label", "summary"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { key, label, summary, type } = input as { key: string; label: string; summary: string; type?: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const node = await db.memoryNode.create({
+          data: {
+            key,
+            label,
+            type: type ?? "tactic",
+            summary,
+            confidence: 0.3,
+            authority: "agent",
+            source: "proposed_playbook",
+            companyId: company.id,
+            createdById: userId,
+          },
+        });
+        return { ok: true, node, requires: "admin approval" };
+      },
+    },
+
   ];
 }
-
 
 // ---------------------------------------------------------------------------
 // B-3: persist a full turn (user + assistant) so sessions survive ClineCore

@@ -11,7 +11,6 @@ export async function GET(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const companyId = searchParams.get("companyId") as string | null;
     const type = searchParams.get("type") as string | undefined;
 
     const where: any = {};
@@ -24,8 +23,8 @@ export async function GET(req: Request) {
     if (company?.id) {
       where.companyId = company.id;
     } else if (session.role !== "admin") {
-      // Non-admin agents only see their own company's nodes
-      where.companyId = session.userId;
+      // No company → non-admin sees nothing (never compare userId to companyId)
+      return NextResponse.json([]);
     }
     // admin sees all (companyId can be NULL or specific)
 
