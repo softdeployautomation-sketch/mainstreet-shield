@@ -16,11 +16,16 @@ export async function GET(req: Request) {
 
     const where: any = {};
 
-    if (companyId) {
-      where.companyId = companyId;
+    // Resolve the user's company for proper company scoping
+    const company = await db.company.findUnique({
+      where: { userId: session.userId },
+    });
+
+    if (company?.id) {
+      where.companyId = company.id;
     } else if (session.role !== "admin") {
-      // Non-admin agents only see their own company's nodes or global (NULL) nodes
-      where.companyId = session.userId; // simplified: use userId as company boundary
+      // Non-admin agents only see their own company's nodes
+      where.companyId = session.userId;
     }
     // admin sees all (companyId can be NULL or specific)
 
@@ -35,27 +40,16 @@ export async function GET(req: Request) {
 
     return NextResponse.json(nodes);
   } catch (error) {
-    console.error("GET /api/mss/memory/nodes error:", error);
-    return NextResponse.json(
-      { error: "internal error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
 
-// POST /api/mss/memory/nodes — Create node (Agent only, confidence 0.5)
+// POST /api/mss/memory/nodes — Create node (any authenticated user, companyId = company.id)
 export async function POST(req: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-    }
-
-    if (session.role !== "agent") {
-      return NextResponse.json(
-        { error: "only agents can create nodes" },
-        { status: 403 }
-      );
     }
 
     const { key, label, type, summary } = await req.json();
@@ -67,10 +61,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // Agent can create node with their own companyId or NULL (global)
-    // For simplicity, agent creates with their userId as companyId, or NULL
-    const companyId = Math.random() > 0.5 ? session.userId : null; // placeholder: agent decides
+    // Resolve the user's company — every authenticated user belongs to a company
+    const company = await db.company.findUnique({
+      where: { userId: session.userId },
+    });
 
+    if (!company) {
+      return NextResponse.json(
+        { error: "company not found; create company first" },
+        { status: 400 }
+      );
+    }
+
+    // Create node scoped to the user's company
     const node = await db.memoryNode.create({
       data: {
         key,
@@ -79,17 +82,13 @@ export async function POST(req: Request) {
         summary,
         confidence: 0.5,
         authority: "agent",
-        companyId,
+        companyId: company.id,
         createdById: session.userId,
       },
     });
 
     return NextResponse.json(node, { status: 201 });
   } catch (error) {
-    console.error("POST /api/mss/memory/nodes error:", error);
-    return NextResponse.json(
-      { error: "internal error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
