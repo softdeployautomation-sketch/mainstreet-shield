@@ -109,6 +109,7 @@ model CompanyAsset {
   type        String   @default("web") // web | api | network | mobile
   target      String   // domain, IP, URL
   inScope     Boolean  @default(true)
+  priority    Int      @default(0)
   details     String?  // T-3.3: free-text details (notes, credentials hints, misconfigurations)
   notes       String?
   groupId     String?   // B-6: optional asset group/folder

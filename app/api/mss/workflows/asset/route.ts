@@ -2,7 +2,6 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
-// POST /api/mss/workflows/asset/status — Set asset status
 export async function POST(req: Request) {
   try {
     const session = await getSession();
@@ -10,7 +9,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
     }
 
-    const { assetId, status } = await req.json();
+    const { assetId, status, note } = await req.json();
 
     if (!assetId || !status) {
       return NextResponse.json(
@@ -19,16 +18,34 @@ export async function POST(req: Request) {
       );
     }
 
-    // For now, just validate and return
-    // In a full implementation, this would update an Asset model
-    return NextResponse.json({ assetId, status, success: true });
+    // Find the asset and verify ownership
+    const asset = await db.companyAsset.findFirst({
+      where: {
+        id: assetId,
+        companyId: session.userId,
+      },
+    });
+
+    if (!asset) {
+      return NextResponse.json({ error: "asset not found or access denied" }, { status: 404 });
+    }
+
+    // Update the asset status
+    const updatedAsset = await db.companyAsset.update({
+      where: { id: assetId },
+      data: {
+        status,
+        ...(note && { note }),
+      },
+    });
+
+    return NextResponse.json(updatedAsset, { status: 200 });
   } catch (error) {
     console.error("POST /api/mss/workflows/asset/status error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
 
-// POST /api/mss/workflows/asset/priority — Set asset priority
 export async function priority(req: Request) {
   try {
     const session = await getSession();
@@ -45,29 +62,27 @@ export async function priority(req: Request) {
       );
     }
 
-    // Similar to status, this is a placeholder for asset priority management
-    return NextResponse.json({ assetId, priority, success: true });
-  } catch (error) {
-    console.error("POST /api/mss/workflows/asset/priority error:", error);
-    return NextResponse.json({ error: "internal error" }, { status: 500 });
-  }
-}
+    // Find the asset and verify ownership
+    const asset = await db.companyAsset.findFirst({
+      where: {
+        id: assetId,
+        companyId: session.userId,
+      },
+    });
 
-// GET /api/mss/workflows/asset/test-queue — Get test queue status
-export async function GET(req: Request) {
-  try {
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    if (!asset) {
+      return NextResponse.json({ error: "asset not found or access denied" }, { status: 404 });
     }
 
-    // Get test queue items - using db mock query for now
-    // In production, this would query a proper test_queue table
-    const testQueue: any[] = [];
+    // Update the asset priority
+    const updatedAsset = await db.companyAsset.update({
+      where: { id: assetId },
+      data: { priority },
+    });
 
-    return NextResponse.json(testQueue);
+    return NextResponse.json(updatedAsset, { status: 200 });
   } catch (error) {
-    console.error("GET /api/mss/workflows/asset/test-queue error:", error);
+    console.error("POST /api/mss/workflows/asset/priority error:", error);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }

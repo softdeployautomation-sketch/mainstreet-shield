@@ -1,0 +1,520 @@
+// Prisma schema for MainStreet Shield (new repo, separate from spaceworker)
+// Generator and datasource
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Core identity (MainStreet Shield users)
+// ---------------------------------------------------------------------------
+model User {
+  id                String            @id @default(cuid())
+  email             String            @unique
+  name              String?
+  password          String?           // bcrypt hash
+  role              String            @default("user") // "user" | "admin"
+  tier              String            @default("1")    // "1" | "3" | "5" — access tier
+  referredBy        String?           // referral code that brought this user in
+  referredByLinkId  String?           // FK to ReferralLink
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  shieldVms         ShieldLinuxVM[]
+  signupInvites     SignupInvite[]    @relation("InviteCreatedBy")
+  inviteUsedBy      SignupInvite[]    @relation("InviteUsedBy")
+  referrals         Referral[]        @relation("Referrer")
+  referredByRef     Referral[]        @relation("Referred")
+  referralLink      ReferralLink?     // user's own shareable referral link
+  company           Company?
+  workflows         Workflow[]
+  contextDocSteps   ContextDocStep[]
+  mssAgentSessions  MssAgentSession[]
+  agentFindings     AgentFinding[]
+  userSettings      UserSettings?
+  clineAuthSession  ClineAuthSession?
+}
+
+// ---------------------------------------------------------------------------
+// Shield Linux VM — the real Linux OS with GUI, hard-capped so it can't
+// starve the host VPS
+// ---------------------------------------------------------------------------
+model ShieldLinuxVM {
+  id          String   @id @default(cuid())
+  userId      String
+  label       String   @default("shield-lab")
+  state       String   @default("stopped") // stopped | starting | running | stopping | failed
+  vncPort     Int      @default(5901)
+  ramMb       Int      @default(4096)
+  vcpu        Int      @default(2)
+  diskGb      Int      @default(60)
+  vmIp        String?
+  sshPort     Int?
+  startedAt   DateTime?
+  stoppedAt   DateTime?
+  vncPassword String?  // random per-session, never logged
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vncAccess VncAccess?
+}
+
+// ---------------------------------------------------------------------------
+// Admin invite tokens for MainStreet Shield signups
+// ---------------------------------------------------------------------------
+model SignupInvite {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  email     String?
+  usedById  String?
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdBy String   // admin userId who created the invite
+  createdAt DateTime @default(now())
+
+  usedBy User? @relation("InviteUsedBy", fields: [usedById], references: [id], onDelete: SetNull)
+  creator User @relation("InviteCreatedBy", fields: [createdBy], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// Company onboarding — businesses that want to secure their assets
+// ---------------------------------------------------------------------------
+model Company {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  name        String
+  domain      String?
+  description String?
+  status      String   @default("onboarding") // onboarding | active | paused
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets CompanyAsset[]
+  groups CompanyAssetGroup[]
+  workflows Workflow[]
+  agentFindings AgentFinding[]
+}
+
+// Assets a company wants secured / tested
+model CompanyAsset {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  type        String   @default("web") // web | api | network | mobile
+  target      String   // domain, IP, URL
+  inScope     Boolean  @default(true)
+  details     String?  // T-3.3: free-text details (notes, credentials hints, misconfigurations)
+  notes       String?
+  groupId     String?   // B-6: optional asset group/folder
+  createdAt   DateTime @default(now())
+
+  company  Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  group    CompanyAssetGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  agentFindings AgentFinding[]
+}
+
+// ---------------------------------------------------------------------------
+// CompanyAssetGroup — folders/groups for organizing company assets (B-6)
+// ---------------------------------------------------------------------------
+model CompanyAssetGroup {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  reportDocumentId String?  // T-3.2: linked ReportDocument for scan history
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assets  CompanyAsset[]
+  reportDocuments ReportDocument[]
+
+  @@index([companyId])
+}
+
+
+// ---------------------------------------------------------------------------
+// ReportDocument — scan history + findings per asset group (T-3.2)
+// ---------------------------------------------------------------------------
+model ReportDocument {
+  id          String   @id @default(cuid())
+  groupId     String
+  title       String   // e.g. "Scan results for web group - 2026-11-21"
+  content     String   // markdown: scan process, findings, timestamps, decisions
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  group CompanyAssetGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+// ---------------------------------------------------------------------------
+// Workflows — test workflows humans can create and run
+// ---------------------------------------------------------------------------
+model Workflow {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  description String?
+  status      String   @default("draft") // draft | active | completed | archived
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  triggerCount      Int      @default(0)
+  lastTriggeredAt   DateTime?
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id])
+  steps     WorkflowStep[]
+  agentFindings AgentFinding[]
+}
+
+// ---------------------------------------------------------------------------
+// Workflow steps — individual steps within a workflow
+// ---------------------------------------------------------------------------
+model WorkflowStep {
+  id          String   @id @default(cuid())
+  workflowId  String
+  name        String
+  order       Int
+  status      String   @default("pending") // pending | running | completed | failed
+  tool        String?  // e.g. "nmap", "nuclei", "manual"
+  target      String?
+  result      String?
+  createdAt   DateTime @default(now())
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  agentFindings AgentFinding[]
+}
+
+// ---------------------------------------------------------------------------
+// PendingSignup — signup requests awaiting admin approval
+// No account is created until an admin approves. User gets an email after
+// submitting, and admin gets a notification to review.
+// ---------------------------------------------------------------------------
+model PendingSignup {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  why       String   // why they need the app
+  status    String   @default("pending") // pending | approved | rejected
+  referralCode String? // referral code used at signup
+  adminNote String?  // admin's approval/rejection note
+  reviewedBy  String?  // admin userId who reviewed
+  reviewedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Referrals — referral flow for signups
+// ---------------------------------------------------------------------------
+model Referral {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  referrerId String
+  referredId String?
+  status    String   @default("pending") // pending | claimed | used
+  createdAt DateTime @default(now())
+
+  referrer   User @relation("Referrer", fields: [referrerId], references: [id])
+  referred   User? @relation("Referred", fields: [referredId], references: [id], onDelete: SetNull)
+}
+
+// ---------------------------------------------------------------------------
+// ReferralLink — every user owns one shareable link (like SpaceWorker)
+// ---------------------------------------------------------------------------
+// NOTE: DB table is `referrallink` (lowercase), map to match
+model ReferralLink {
+  // NOTE: DB table is `referrallink` (lowercase), map to match
+  id          String   @id @default(cuid())
+  code        String   @unique
+  userId      String   @unique
+  clicks      Int      @default(0)
+  conversions Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("referrallink")
+}
+
+// ---------------------------------------------------------------------------
+// VNC access — random per-session password, cline always-access
+// ---------------------------------------------------------------------------
+model VncAccess {
+  id          String   @id @default(cuid())
+  vmId        String   @unique
+  password    String   // random per-session, encrypted
+  clineToken  String?  // cline always-access token
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vm ShieldLinuxVM @relation(fields: [vmId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Kill switch state — admin freeze stops all Shield VMs immediately
+// ---------------------------------------------------------------------------
+model ShieldKillSwitch {
+  id          String   @id @default(cuid()) // singleton
+  frozen      Boolean  @default(false)
+  reason      String?
+  frozenBy    String?
+  frozenAt    DateTime?
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// MssAgentSession — audit trail for all MSS Agent VM actions (human approvals)
+// ---------------------------------------------------------------------------
+model MssAgentSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String?   // B-2: chat session title (repurposed from VM actions to agent chat)
+  vmId      String?   // kept optional; VM-specific field now unused by chat sessions
+  status    String   @default("active") // active | completed | failed
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+  commandLog Json     @default("[]")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// B-3: chat transcript fallback store so sessions survive ClineCore recreation.
+// The Cline SDK reads transcripts from its local file backend; if that ever
+// comes back empty (e.g. across serverless invocations) we fall back to these
+// rows so session switching still loads the conversation.
+// ---------------------------------------------------------------------------
+model ClineAgentMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  role      String   // "user" | "assistant"
+  content   Json     // { text: string, thinking?: string[] }
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// ContextDocStep — audit trail for all MSS Agent VM actions (human approvals)
+// ---------------------------------------------------------------------------
+model ContextDocStep {
+  id        String   @id @default(cuid())
+  userId    String
+  stepType  String   // e.g. "CLINE_VM_COMMAND_APPROVAL", "CLINE_VM_SESSION_START", "CLINE_VM_SESSION_END"
+  content   String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// AgentFinding — evidence store for every attack the MSS Agent performs.
+// NOT ARTEX-only: stores SSH creds, screenshots, scan output, proof of exploit
+// for ALL agent actions. Human-gated: agent creates with status "open",
+// human reviews and sets "reviewed"/"closed" + note before agent can pivot.
+// ---------------------------------------------------------------------------
+model AgentFinding {
+  id          String   @id @default(cuid())
+  companyId   String
+  userId      String    // who created (agent or human)
+  assetId     String?   // linked CompanyAsset if applicable
+  workflowId  String?   // linked Workflow if applicable
+  stepId      String?   // linked WorkflowStep if applicable
+  title       String    // e.g. "SSH access gained on web-01"
+  accessType  String    // ssh | http | database | command | other
+  target      String    // host, IP, URL, or command
+  credentials Json?     // encrypted: { username, password, key, port, ... } AES-GCM
+  evidence    Json?     // proof: screenshot base64, scan output, CVE refs, logs
+  status      String    @default("open") // open | reviewed | closed | active
+  humanNote   String?   // admin reviewer note
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset   CompanyAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  workflow Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  step    WorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Per-user settings — Cline agent API key + model + endpoint (S2-8)
+// ---------------------------------------------------------------------------
+model UserSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  clineApiKeyEnc  String?  // AES-GCM encrypted Cline API key
+  clineModelId    String?
+  clineApiEndpoint String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// ClineAuthSession — OAuth device-code login session for Cline (S2-9)
+// OAuth access token is encrypted at rest via lib/clin/token-store.
+// Requires owner approval + `prisma migrate` before deploy (NOT applied here).
+// ---------------------------------------------------------------------------
+model ClineAuthSession {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  clineOAuthTokenEnc   String   // AES-GCM encrypted OAuth access token
+  clineRefreshTokenEnc String?  // AES-GCM encrypted OAuth refresh token (for getValidClineCredentials)
+  email                String?
+  expiresAt            DateTime?
+  connected            Boolean  @default(false)
+  connectedAt          DateTime?
+  updatedAt            DateTime @updatedAt
+  // Pending device-code login flow
+  deviceCode           String?
+  userCode             String?
+  deviceCodeExpiresAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------:
+// AgentScanLink — pins an ARTEX MCP task to a chat session for life.
+// Session resolution: explicit session → AgentScanLink(taskId) → user's last
+// MssAgentSession → error. One taskId = exactly one chatSessionId (chat-origin
+// scans pin their session; workflow/api scans fall back to the last session).
+// ---------------------------------------------------------------------------:
+model AgentScanLink {
+  id            String   @id @default(cuid())
+  taskId        String   @unique
+  chatSessionId String
+  userId        String
+  origin        String   // "chat" | "workflow" | "api"
+  source        String?
+  createdAt     DateTime @default(now())
+
+  @@index([chatSessionId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------:
+// AgentScanEvent — persisted copy of every user-facing scan_event (C4).
+// Best-effort persistence from lib/mss/scan-events.ts; never blocks a turn.
+// The user+session fan-out lives in the in-memory bus; this table is the
+// durable record (chips survive reload via the Cline transcript + this log).
+// ---------------------------------------------------------------------------:
+model AgentScanEvent {
+  id          String   @id @default(cuid())
+  taskId      String
+  type        String   // scan_started | scan_progress | scan_completed | scan_failed
+  message     String
+  progress    String?
+  currentStep String?
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// PromptTemplate — versioned, admin-activated agent instruction text.
+// Only policy text is stored here; tool docs + safety invariants stay in code.
+// Additive: no FK to User/Company.
+// ---------------------------------------------------------------------------
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  key         String   // "mss.policy"
+  scope       String   @default("global") // global | company
+  scopeKey    String   @default("global") // "global" or companyId (NULL-safe uniqueness)
+  companyId   String?
+  name        String
+  description String?
+  body        String   @db.Text
+  version     Int
+  status      String   @default("draft") // draft | active | archived
+  source      String   @default("human") // human | agent
+  rationale   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  activatedAt DateTime?
+  archivedAt  DateTime?
+
+  @@unique([key, scopeKey, version])
+  @@index([key, status])
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// InfraActionLog — audit log for admin infrastructure actions (Task B).
+// No FKs; append-only.
+// ---------------------------------------------------------------------------
+model InfraActionLog {
+  id        String   @id @default(cuid())
+  action    String
+  actor     String
+  ok        Boolean
+  detail    String?
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Graph memory — Postgres-native node/edge/review queue (D18–D24)
+// ---------------------------------------------------------------------------
+model MemoryNode {
+  id          String   @id @default(cuid())
+  key         String   // unique slug within tenant
+  label       String
+  type        String   // "ip" | "domain" | "port" | "service" | "vuln" | "finding" | "tactic" | "technique"
+  summary     String?
+  confidence  Float    @default(0.5)
+  authority   String   @default("agent") // "agent" | "human" | "sanitized_global"
+  source      String?
+  companyId   String?  // NULL = global sanitized playbook
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, companyId])
+  @@index([type])
+  @@index([companyId])
+}
+
+model MemoryEdge {
+  id          String   @id @default(cuid())
+  fromKey     String   // references MemoryNode.key
+  toKey       String   // references MemoryNode.key
+  type        String   // "leads_to" | "exposes" | "mitigates" | "related_to" | "evidence_for"
+  confidence  Float    @default(0.5)
+  status      String   @default("hypothesis") // "hypothesis" | "confirmed" | "rejected"
+  evidence    String?
+  companyId   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([fromKey])
+  @@index([toKey])
+  @@index([companyId])
+}
+
+model MemoryReview {
+  id          String   @id @default(cuid())
+  edgeId      String   @unique
+  action      String   // "confirm" | "reject"
+  decidedById String?
+  decidedAt   DateTime?
+  rationale   String?
+  createdAt   DateTime @default(now())
+}
