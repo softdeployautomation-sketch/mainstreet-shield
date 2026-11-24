@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { startClineSession } from "@/lib/clin/cline-session";
 
 const CRON_PATTERN = /^(\d+|\*)\s+(\d+|\*)\s+\*\s+\*\s+(\d+|\*)$/;
 
@@ -90,6 +91,20 @@ export async function POST(req: Request) {
         where: { id: run.id },
         data: { sessionId: mssSession.id },
       });
+
+      // Kick off the agent by starting a ClineCore session with the initial
+      // prompt so it starts processing immediately instead of waiting for a
+      // user message.
+      try {
+        await startClineSession({
+          sessionId: mssSession.id,
+          userId: trigger.workflow.createdById || "",
+          prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule. Please process the steps defined in this workflow.`,
+          resume: true,
+        });
+      } catch {
+        // Non-fatal: the run/step already exist, the user can still open the chat.
+      }
 
       // Create initial agent_prompt step
       await db.workflowRunStep.create({

@@ -24,12 +24,12 @@ interface Workflow {
   steps: WorkflowStep[];
 }
 
-export default function WorkflowDetailPage({
+export default async function WorkflowDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const { id } = params;
+  const { id } = await params;
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
