@@ -23,7 +23,12 @@ const patchSchema = z.object({
 async function loadOwnedWorkflow(id: string, userId: string) {
   const workflow = await db.workflow.findUnique({
     where: { id },
-    include: { company: { select: { userId: true } }, steps: { orderBy: { order: "asc" } } },
+    include: {
+      company: { select: { userId: true } },
+      steps: { orderBy: { order: "asc" } },
+      workflowTriggers: { orderBy: { id: "asc" } },
+      workflowRuns: { orderBy: { startedAt: "desc" }, take: 20 },
+    },
   });
   if (!workflow) return { error: "not found" as const, status: 404 as const };
   if (workflow.company.userId !== userId) {
@@ -32,7 +37,7 @@ async function loadOwnedWorkflow(id: string, userId: string) {
   return { workflow, status: 200 as const };
 }
 
-// GET /api/workflows/[id] — one workflow + steps (ownership-checked)
+// GET /api/workflows/[id] — one workflow + steps + triggers + recent runs (ownership-checked)
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }

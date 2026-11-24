@@ -348,3 +348,60 @@ Next: await owner GO for push / db push / deploy
 | 3 workflows | `4f324c9` | SVE | 2026-11-24 | **PASS — DEPLOYED** | Schema + API routes + agent tools + run chat sessions + scheduler tick endpoint per D8–D15. Dashboard form now shows Agent Prompt + Cron Schedule fields; light theme fixed (was hardcoded dark `bg-zinc-950`). Gates: prisma valid · tsc 0 · build 0. 0 console.log/transition-all/DSIH. Company-boundary enforced via `session.userId`→`company` relation lookup. Cron parsing fixed (`hour ?? 0`, `minute ?? 0`). `console.error` removed from all route files. `POSTcreate`→`POST` fixed in runs/route.ts. `ClineAgentMessage` storage implemented in messages POST. Commits `ecc9bf3` + `a8a19e2` + `e0f5ae7` + `4f324c9` pushed to origin/main and deployed to VPS 207.244.224.57. `prisma db push` ran successfully on VPS — all 11 new tables confirmed. Service restarted. Dashboard `/dashboard` returns 307 (login redirect) instead of 500 error. Deploy triggered (run 45318850925). | |
 | 4 notifications | `3048e3f`, `69e7cf3`, `a82f9fc` | SVE | 2026-11-24 | **PASS — DEPLOYED** | WP7.3 Notifications: outbox + Resend + prefs + approval links + needs-human flow. Prompt at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. Depends on WP7.2 (Batch 3 deployed). Gates: prisma validate · prisma generate · tsc --noEmit · CI=true npm run build. | |
 | Workflow form fix | `1343591` | SVE | 2026-11-24 | **PASS — PUSHED** | Workflow form: name + agent_prompt mandatory client-side validation, agent_prompt required in Zod schema, graceful session handling (workflow still creates without session table), real error messages instead of generic "workflow creation failed". Fixes: removed HTML5 `required` from step name inputs, `agent_prompt` now `z.string().min(1)`, `MssAgentSession`/`WorkflowRun`/`ClineAgentMessage` wrapped in try/catch. tsc 0 · build 0. Pushed to origin/main, awaiting owner deploy trigger. | |
+
+---
+
+## 13. Open bugs — SVE-verified 2026-11-24 (B-1..B-11)
+
+Verified against code, not the earlier summary. Full fix spec:
+`task/TASK_258_SVE_FIX_REMAINING_BUGS_PROMPT.md`.
+Status: **B-1 DONE (SVE, uncommitted)** — task agent output was corrupt; SVE rewrote the page, added
+`lib/workflows/cron.ts`, added `Workflow.agentPrompt`, extended `GET /api/workflows/[id]`.
+Gates green: prisma validate ok · generate ok · tsc 0 · build 0. Remaining B-2..B-11 issued to task agent.
+
+| # | Sev | Location | Verified finding | Required fix |
+|---|---|---|---|---|
+| B-1 | P1 | `app/dashboard/workflows/[id]/page.tsx`, `app/api/workflows/[id]/route.ts` | **FIXED by SVE 2026-11-24** — now a sync `"use client"` component using `useParams`; API returns triggers + 20 runs + `agentPrompt`; page renders both panels. Task agent's first attempt was rejected (deleted component declaration, wrong `useParams` import, `await` in non-async loader). | — verify only (CP-8) |
+| B-2 | P2 | `components/workflow-list.tsx:7-15`, `app/dashboard/workflows/page.tsx:26-46` | list never selects triggers or last run | include trigger + latest run; render badges |
+| B-3 | P2 | `app/dashboard/page.tsx:196,198`, `app/dashboard/assets/page.tsx` | `Pending` and `—` hardcoded; no status column; no `CompanyAsset` status field | derive from `AgentFinding` (`lib/assets/status.ts`); add columns + `?status=` filter |
+| B-4 | P1 | `lib/clin/cline-session.ts` (`mssTools`), `app/api/mss/asset-groups/route.ts:23-27` | no create-group tool; route uses User id as Company id | add group tools; resolve company from `userId` |
+| B-5 | P1 | `app/internal/scheduler/tick/route.ts:34,41-43,50-53,99,109`, `app/api/workflows/route.ts:136` | session gate blocks timer; prefix-only bearer; `nextRunAt null` never matches; no persisted `agentPrompt`; run stuck `pending`; step created after agent start | token auth, 5-field cron helper, claim via `updateMany`, persist `agentPrompt`, advance run status |
+| B-6 | P2 | `app/dashboard/workflows/new/components/workflow-form.tsx:54,57`, `app/api/workflows/route.ts` | server ownership OK; 6-field cron vs 5-field parser; no cron validation; sends `companyId`/`userId` | 5-field cron, server validation, drop trust props |
+| B-7 | P2 | `prisma/schema.prisma.bak` | **RESOLVED** — not on disk or in index (added `ecc9bf3`, removed `579e62b`) | add `*.bak` to `.gitignore` |
+| B-8 | P1 | `app/api/mss/workflows/[id]/route.ts:8`, `[id]/run/route.ts:8`, `runs/skip/route.ts:8`, `runs/route.ts:95,102` | Next 16 `params` is a Promise; `id` undefined → 500; dead `POSTretry` export | `params: Promise<{id: string}>` + `await params`; delete `POSTretry` |
+| B-9 | P2 | `app/api/mss/workflow-triggers/route.ts:35,41`, `runs/route.ts:33,116`, `runs/skip/route.ts:39` | compares Company id to User id | resolve user company id before compare |
+| B-10 | P1 | `lib/clin/cline-session.ts` | no workflow get/update/delete; no trigger CRUD; no run list/get/skip/retry/manual-run; no group create/list/rename/delete; no asset/report delete | add the tool matrix in the prompt |
+| B-11 | P1 | `lib/clin/cline-session.ts`, `app/api/mss/memory/route.ts:23,54,72`, `app/api/mss/memory/review/route.ts` | memory tools absent; API uses `userId` as `companyId`, requires role `"agent"`, `Math.random()` company; review PATCH has no dynamic segment | add `mss_remember/recall/link/note_outcome/list_hypotheses/propose_playbook`; fix scoping + move review route |
+
+Fix order (remaining): **B-4 -> B-11 -> B-5 -> B-10 -> B-8 -> B-9 -> B-3 -> B-2 -> B-6 -> B-7**
+
+Already landed by SVE: `lib/workflows/cron.ts` (`parseCron`/`nextRunAt`/`describeCron`), `Workflow.agentPrompt`,
+and the B-1 page + GET route. B-5 and B-10 consume the existing cron helper — do not recreate it.
+Repo has **no `prisma/migrations/` directory** (schema is applied with `prisma db push`): do not create a migration folder.
+
+### 13.1 SVE checkpoints for this round (CP-1..CP-22)
+
+```
+CP-1  git status clean except intended files; no .env/lockfile/dump
+CP-2  origin/main..HEAD = 9 commits, one concern each; reflog shows no push
+CP-3  no WP6.8 files in diff
+CP-4  prisma validate ok; migration dir exists; schema diff additive (Workflow.agentPrompt)
+CP-5  prisma generate ok
+CP-6  tsc --noEmit = 0
+CP-7  CI=true npm run build = success (lint/test pre-existing failure documented)
+CP-8  B-1: no async client page; useParams used; API returns triggers+runs+agentPrompt; UI renders both
+CP-9  B-2: list shows trigger label + last-run badge from real fields
+CP-10 B-3: no hardcoded Pending/—; derived status + last-tested; filter works; Batch 5 comment
+CP-11 B-4: group tools exist; /api/mss/asset-groups never uses session.userId as companyId
+CP-12 B-5: timingSafeEqual SCHEDULER_TOKEN; 503 unset/401 mismatch; claim updateMany; OR null; step before agent; run status advanced; lastTriggeredAt; phantom run removed
+CP-13 B-6: no client computedCron; server parseCron 400; form sends no companyId/userId
+CP-14 B-7: .bak absent; *.bak ignored
+CP-15 B-8: all mss routes use Promise params; POSTretry gone
+CP-16 B-9: no `companyId !== session.userId` remains in app/api/mss
+CP-17 B-10: every listed workflow/trigger/run/group/asset/report tool present and ownership-checked
+CP-18 B-11: memory tools present; memory API company-scoped; no Math.random/role "agent"/console.error; review route under [id]
+CP-19 Scans: 0 new console.log/transition-all/DSIH; no zinc in touched files; no secret literals
+CP-20 MSS_TOOL_DOCS updated for every new/changed tool
+CP-21 Owner queue restated: SCHEDULER_TOKEN, systemd timer (:3000 tick), db push window, optional stale-run cleanup
+CP-22 Docs updated (runbook §9/§10/§11, checklist §13, fix prompt) before PASS/FAIL report
+```

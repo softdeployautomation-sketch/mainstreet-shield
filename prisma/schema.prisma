@@ -168,6 +168,7 @@ model Workflow {
   companyId   String
   name        String
   description String?
+  agentPrompt String?  // persisted so scheduled/manual runs can send it to the agent
   status      String   @default("draft") // draft | active | completed | archived
   createdById String
   createdAt   DateTime @default(now())

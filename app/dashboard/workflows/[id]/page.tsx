@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-
-export const dynamic = "force-dynamic";
+import { useParams } from "next/navigation";
+import { describeCron } from "@/lib/workflows/cron";
 
 interface WorkflowStep {
   id?: string;
@@ -14,22 +14,53 @@ interface WorkflowStep {
   status?: string;
 }
 
+interface WorkflowTrigger {
+  id: string;
+  cron: string;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  maxRuns: number;
+  runsDone: number;
+}
+
+interface WorkflowRun {
+  id: string;
+  status: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  sessionId: string | null;
+}
+
 interface Workflow {
   id: string;
   name: string;
   description: string | null;
+  agentPrompt: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
   steps: WorkflowStep[];
+  workflowTriggers: WorkflowTrigger[];
+  workflowRuns: WorkflowRun[];
 }
 
-export default async function WorkflowDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
+}
+
+function runDotClass(status: string): string {
+  if (status === "completed") return "bg-emerald-500";
+  if (status === "failed") return "bg-rose-500";
+  if (status === "needs_human") return "bg-amber-500";
+  return "bg-fg-muted";
+}
+
+export default function WorkflowDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -39,32 +70,43 @@ export default async function WorkflowDetailPage({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchWorkflow();
-  }, [id]);
+    let cancelled = false;
 
-  const fetchWorkflow = async () => {
-    try {
-      const res = await fetch(`/api/workflows/${encodeURIComponent(id)}`, {
-        credentials: "same-origin",
-      });
-      if (!res.ok) {
-        if (res.status === 404 || res.status === 403) {
-          setError("Workflow not found or you don't have access to it.");
-          setLoading(false);
-          return;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/workflows/${encodeURIComponent(id)}`, {
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          if (res.status === 404 || res.status === 403) {
+            if (!cancelled) {
+              setError("Workflow not found or you don't have access to it.");
+              setLoading(false);
+            }
+            return;
+          }
+          throw new Error("Failed to load workflow");
         }
-        throw new Error("Failed to load workflow");
+        const data = await res.json();
+        if (cancelled) return;
+        setWorkflow(data.workflow);
+        setEditName(data.workflow.name);
+        setEditSteps(data.workflow.steps);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load workflow");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      const data = await res.json();
-      setWorkflow(data.workflow);
-      setEditName(data.workflow.name);
-      setEditSteps(data.workflow.steps);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load workflow");
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,7 +119,7 @@ export default async function WorkflowDetailPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: editName.trim(),
-          steps: editSteps.map((s, i) => ({
+          steps: editSteps.map((s) => ({
             name: s.name,
             tool: s.tool || undefined,
             target: s.target || undefined,
@@ -121,21 +163,15 @@ export default async function WorkflowDetailPage({
   };
 
   const handleStepNameChange = (index: number, value: string) => {
-    const steps = [...editSteps];
-    steps[index].name = value;
-    setEditSteps(steps);
+    setEditSteps(editSteps.map((s, i) => (i === index ? { ...s, name: value } : s)));
   };
 
   const handleStepToolChange = (index: number, value: string) => {
-    const steps = [...editSteps];
-    steps[index].tool = value || undefined;
-    setEditSteps(steps);
+    setEditSteps(editSteps.map((s, i) => (i === index ? { ...s, tool: value || undefined } : s)));
   };
 
   const handleStepTargetChange = (index: number, value: string) => {
-    const steps = [...editSteps];
-    steps[index].target = value || undefined;
-    setEditSteps(steps);
+    setEditSteps(editSteps.map((s, i) => (i === index ? { ...s, target: value || undefined } : s)));
   };
 
   if (loading) {
@@ -150,7 +186,10 @@ export default async function WorkflowDetailPage({
     return (
       <section className="py-8">
         <p className="text-sm text-rose-400">{error || "Workflow not found"}</p>
-        <Link href="/dashboard/workflows" className="text-xs font-mono text-brand-600 hover:text-brand-400">
+        <Link
+          href="/dashboard/workflows"
+          className="text-xs font-mono text-brand-600 hover:text-brand-400"
+        >
           ← All workflows
         </Link>
       </section>
@@ -158,92 +197,290 @@ export default async function WorkflowDetailPage({
   }
 
   const headerActions = (
-    <div className="flex items-center gap-2">
-      <button onClick={() => setEditing(true)} disabled={editing || saving} className="rounded border border-brand-600 bg-brand-600 px-3 py-1.5 text-xs font-mono text-white hover:!bg-brand-500 disabled:opacity-60">{editing ? "Editing…" : "Edit"}</button>
-      <Link href="/dashboard/workflows" className="text-xs font-mono text-fg-muted hover:text-brand-600 dark:hover:text-brand-400">← All workflows</Link>
+    <div className="mb-4 flex items-center gap-3">
+      <Link
+        href="/dashboard/workflows"
+        className="text-xs font-mono text-fg-muted hover:text-fg"
+      >
+        ← All workflows
+      </Link>
+      <span className="flex-1" />
+      {editing ? (
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="rounded border border-border bg-bg px-4 py-2 text-sm font-mono text-fg hover:bg-bg-elevated"
+        >
+          Cancel
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+        >
+          Edit
+        </button>
+      )}
+    </div>
+  );
+
+  const triggerPanel = (
+    <div className="border-t border-border/50 pt-6 mt-6">
+      <h2 className="text-sm font-mono text-fg-muted uppercase tracking-wider mb-2">
+        {workflow.workflowTriggers.length > 0 ? "Triggers" : "Manual only"}
+      </h2>
+      {workflow.workflowTriggers.length === 0 ? (
+        <p className="text-sm text-fg-muted">
+          No scheduled triggers. This workflow runs only when triggered manually.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {workflow.workflowTriggers.map((trigger) => (
+            <div
+              key={trigger.id}
+              className="rounded-lg border border-border/50 bg-bg-elevated p-4"
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  className={
+                    trigger.enabled
+                      ? "mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500"
+                      : "mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-rose-500"
+                  }
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="text-sm font-mono text-fg">
+                    {describeCron(trigger.cron)}
+                  </div>
+                  <div className="text-xs font-mono text-fg-muted">
+                    {trigger.cron} · {trigger.enabled ? "enabled" : "disabled"}
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-fg-muted">
+                    <span>
+                      Runs: {trigger.runsDone}
+                      {trigger.maxRuns === -1 ? " / unlimited" : ` / ${trigger.maxRuns}`}
+                    </span>
+                    <span>Next: {formatDateTime(trigger.nextRunAt)}</span>
+                    <span>Last: {formatDateTime(trigger.lastRunAt)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const runHistoryPanel = (
+    <div className="border-t border-border/50 pt-6 mt-6">
+      <h2 className="text-sm font-mono text-fg-muted uppercase tracking-wider mb-2">
+        Run history
+      </h2>
+      {workflow.workflowRuns.length > 0 ? (
+        <ol className="max-h-80 space-y-2 overflow-y-auto">
+          {workflow.workflowRuns.slice(0, 20).map((run) => (
+            <li
+              key={run.id}
+              className="flex items-start gap-3 rounded border border-border/40 px-3 py-2"
+            >
+              <span
+                className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${runDotClass(run.status)}`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-mono text-fg">{run.status}</div>
+                <div className="text-[11px] font-mono text-fg-muted">
+                  started {formatDateTime(run.startedAt)}
+                  {run.endedAt ? ` · finished ${formatDateTime(run.endedAt)}` : ""}
+                </div>
+              </div>
+              {run.sessionId ? (
+                <Link
+                  href={`/dashboard?session=${encodeURIComponent(run.sessionId)}`}
+                  className="text-xs font-mono text-brand-600 hover:text-brand-400"
+                >
+                  chat →
+                </Link>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-sm text-fg-muted">No runs yet.</p>
+      )}
     </div>
   );
 
   const viewMode = (
-    <>
-      <div className="mt-2 mb-8 flex items-center gap-3 flex-wrap">
-        <h1 className="text-3xl font-display font-bold tracking-tight">
-          {workflow.name}
-        </h1>
-        <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-fg-muted">
-          {workflow.status}
-        </span>
-        <span className="text-xs font-mono text-fg-muted">
-          updated {new Date(workflow.updatedAt).toLocaleString()}
-        </span>
+    <div className="space-y-4">
+      <h1 className="text-2xl font-display font-bold tracking-tight">{workflow.name}</h1>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div>
+          <div className="mb-1 text-xs font-mono uppercase tracking-wider text-fg-muted">
+            Status
+          </div>
+          <span className="text-sm font-mono text-fg">{workflow.status}</span>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-mono uppercase tracking-wider text-fg-muted">
+            Created
+          </div>
+          <p className="text-sm font-mono text-fg">{formatDateTime(workflow.createdAt)}</p>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-mono uppercase tracking-wider text-fg-muted">
+            Last updated
+          </div>
+          <p className="text-sm font-mono text-fg">{formatDateTime(workflow.updatedAt)}</p>
+        </div>
       </div>
 
-      {workflow.description ? (
-        <p className="mb-8 text-sm text-fg-muted max-w-3xl">{workflow.description}</p>
-      ) : null}
+      <div>
+        <div className="mb-1 text-xs font-mono uppercase tracking-wider text-fg-muted">
+          Description
+        </div>
+        <p className="text-sm font-mono text-fg">{workflow.description || "—"}</p>
+      </div>
 
-      <div className="rounded-xl border border-border bg-bg-elevated p-6">
-        <h2 className="text-lg font-display font-bold mb-4">Steps ({workflow.steps.length})</h2>
-        {workflow.steps.length === 0 ? (
-          <p className="text-sm text-fg-muted">No steps yet.</p>
-        ) : (
-          <ol className="space-y-3">
+      <div>
+        <div className="mb-1 text-xs font-mono uppercase tracking-wider text-fg-muted">
+          Agent prompt
+        </div>
+        <p className="whitespace-pre-wrap text-sm font-mono text-fg">
+          {workflow.agentPrompt || "—"}
+        </p>
+      </div>
+
+      <div className="mt-6 border-t border-border/50 pt-6">
+        <h2 className="mb-2 text-sm font-mono uppercase tracking-wider text-fg-muted">Steps</h2>
+        {workflow.steps.length > 0 ? (
+          <ol className="space-y-2">
             {workflow.steps.map((s, i) => (
-              <li key={s.id} className="flex items-start gap-3 rounded-lg border border-border/50 p-3">
-                <span className="font-mono text-xs text-fg-muted w-6 shrink-0 pt-0.5">{String(i + 1).padStart(2, "0")}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-mono text-fg">{s.name}</p>
-                  <p className="text-xs text-fg-muted mt-0.5">{s.tool ? `tool: ${s.tool}` : "no tool"}{s.target ? ` · target: ${s.target}` : ""}</p>
-                </div>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-fg-muted shrink-0 pt-0.5">{s.status}</span>
+              <li key={s.id ?? i} className="flex items-center gap-2">
+                <span className="h-1 w-1 flex-shrink-0 rounded-full bg-fg-muted" />
+                <span className="text-sm font-mono text-fg">{s.name}</span>
+                {s.tool ? (
+                  <span className="text-[10px] font-mono text-fg-muted">· {s.tool}</span>
+                ) : null}
+                {s.target ? (
+                  <span className="text-[10px] font-mono text-fg-muted">· {s.target}</span>
+                ) : null}
+                {s.status ? (
+                  <span className="ml-auto flex-shrink-0 text-[10px] font-mono text-fg-muted">
+                    {s.status}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ol>
+        ) : (
+          <p className="text-sm italic text-fg-muted">No steps yet.</p>
         )}
       </div>
-    </>
+
+      {triggerPanel}
+      {runHistoryPanel}
+    </div>
   );
 
   const editMode = (
     <form onSubmit={handleSave} className="space-y-6">
       <div>
-        <label className="block text-xs font-mono text-fg-muted mb-1">Workflow name</label>
-        <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="rounded border border-border bg-bg px-3 py-2 text-sm font-mono text-fg w-full" required />
+        <label className="mb-1 block text-xs font-mono text-fg-muted">Workflow name</label>
+        <input
+          type="text"
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          className="w-full rounded border border-border bg-bg px-3 py-2 text-sm font-mono text-fg"
+          required
+        />
       </div>
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-display font-bold">Steps</h2>
-          <button type="button" onClick={handleAddStep} className="rounded border border-border bg-white px-2 py-1 text-xs font-mono text-fg hover:bg-bg-elevated">+ Add step</button>
+          <button
+            type="button"
+            onClick={handleAddStep}
+            className="rounded border border-border bg-bg-elevated px-2 py-1 text-xs font-mono text-fg hover:bg-bg"
+          >
+            + Add step
+          </button>
         </div>
         {editSteps.length === 0 ? (
-          <p className="text-sm text-fg-muted italic">No steps yet. Add one above.</p>
+          <p className="text-sm italic text-fg-muted">No steps yet. Add one above.</p>
         ) : (
           <div className="space-y-3">
             {editSteps.map((step, i) => (
-              <div key={step.id ?? i} className="rounded-lg border border-border/50 p-3 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+              <div
+                key={step.id ?? i}
+                className="grid grid-cols-1 items-end gap-3 rounded-lg border border-border/50 p-3 md:grid-cols-4"
+              >
                 <div className="col-span-1 md:col-span-2">
-                  <label className="block text-xs font-mono text-fg-muted mb-1">Step name</label>
-                  <input type="text" value={step.name} onChange={(e) => handleStepNameChange(i, e.target.value)} className="rounded border border-border bg-bg px-2 py-1.5 text-xs font-mono text-fg w-full" required />
+                  <label className="mb-1 block text-xs font-mono text-fg-muted">Step name</label>
+                  <input
+                    type="text"
+                    value={step.name}
+                    onChange={(e) => handleStepNameChange(i, e.target.value)}
+                    className="w-full rounded border border-border bg-bg px-2 py-1.5 text-xs font-mono text-fg"
+                    required
+                  />
                 </div>
-                <div className="col-span-1 md:col-span-1">
-                  <label className="block text-xs font-mono text-fg-muted mb-1">Tool</label>
-                  <input type="text" value={step.tool ?? ""} onChange={(e) => handleStepToolChange(i, e.target.value)} placeholder="e.g. shell" className="rounded border border-border bg-bg px-2 py-1.5 text-xs font-mono text-fg w-full" />
+                <div className="col-span-1">
+                  <label className="mb-1 block text-xs font-mono text-fg-muted">Tool</label>
+                  <input
+                    type="text"
+                    value={step.tool ?? ""}
+                    onChange={(e) => handleStepToolChange(i, e.target.value)}
+                    placeholder="e.g. shell"
+                    className="w-full rounded border border-border bg-bg px-2 py-1.5 text-xs font-mono text-fg"
+                  />
                 </div>
-                <div className="col-span-1 md:col-span-1">
-                  <label className="block text-xs font-mono text-fg-muted mb-1">Target</label>
-                  <input type="text" value={step.target ?? ""} onChange={(e) => handleStepTargetChange(i, e.target.value)} placeholder="optional" className="rounded border border-border bg-bg px-2 py-1.5 text-xs font-mono text-fg w-full" />
+                <div className="col-span-1">
+                  <label className="mb-1 block text-xs font-mono text-fg-muted">Target</label>
+                  <input
+                    type="text"
+                    value={step.target ?? ""}
+                    onChange={(e) => handleStepTargetChange(i, e.target.value)}
+                    placeholder="optional"
+                    className="w-full rounded border border-border bg-bg px-2 py-1.5 text-xs font-mono text-fg"
+                  />
                 </div>
-                <button type="button" onClick={() => handleRemoveStep(i)} className="rounded border border-rose-500/40 bg-white px-2 py-1.5 text-[10px] font-mono text-rose-400 hover:bg-rose-900/20">Remove</button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveStep(i)}
+                  className="rounded border border-rose-500/40 bg-bg-elevated px-2 py-1.5 text-[10px] font-mono text-rose-400 hover:bg-rose-900/20"
+                >
+                  Remove
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
       <div className="flex items-center gap-3">
-        <button type="submit" disabled={saving} className="rounded border border-brand-600 bg-brand-600 px-4 py-2 text-sm font-mono font-bold text-white disabled:opacity-60 hover:!bg-brand-500 disabled:hover:!bg-brand-600">{saving ? "Saving…" : "Save changes"}</button>
-        <button type="button" onClick={handleCancel} disabled={saving} className="rounded border border-border bg-white px-4 py-2 text-sm font-mono text-fg disabled:opacity-60 hover:bg-bg-elevated disabled:hover:!bg-white">Cancel</button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded border border-brand-600 bg-brand-600 px-4 py-2 text-sm font-mono font-bold text-white disabled:opacity-60 hover:bg-brand-500"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          type="button"
+          onClick={handleCancel}
+          disabled={saving}
+          className="rounded border border-border bg-bg-elevated px-4 py-2 text-sm font-mono text-fg disabled:opacity-60 hover:bg-bg"
+        >
+          Cancel
+        </button>
       </div>
-      {error && <div className="rounded bg-rose-900/20 border border-rose-500/30 p-3 text-sm text-rose-400">{error}</div>}
+      {error ? (
+        <div className="rounded border border-rose-500/30 bg-rose-900/20 p-3 text-sm text-rose-400">
+          {error}
+        </div>
+      ) : null}
     </form>
   );
 

@@ -25,7 +25,7 @@ Read order for a new SVE:
 
 ---
 
-## 2. Current snapshot (2026-11-23)
+## 2. Current snapshot (2026-11-24)
 
 | Item | Value |
 |---|---|
@@ -221,17 +221,28 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 ---
 
 
-## 9. Known Bugs — Open for Next SVE
+## 9. SVE-verified bug register (2026-11-24)
 
-| # | Bug | Location | Severity |
-|---|-----|----------|----------|
-| B-1 | Workflow detail page shows dark/blank "page could not load" — doesn't show trigger type (daily/one-time/custom/manual), run status (success/pending/failed), or run history | `app/dashboard/workflows/[id]/page.tsx` | P1 |
-| B-2 | Workflow list doesn't show trigger type or last run status | `components/workflow-list.tsx` | P2 |
-| B-3 | Overview/assets page shows all assets as "pending" including already tested ones; no status filter | `app/dashboard/page.tsx`, `app/dashboard/assets/page.tsx` | P2 |
-| B-4 | Chat agent claims it can't create an asset group — `mss_create_asset_group` tool may not exist or `CompanyAssetGroup` model missing from schema | `lib/clin/cline-session.ts`, agent tool registry | P1 |
-| B-5 | Scheduler tick: agent may not respond to scheduled workflow messages until user manually chats | `app/internal/scheduler/tick/route.ts`, `lib/clin/cline-session.ts` | P1 |
-| B-6 | Workflow form: Agent Prompt and Cron Schedule fields exist but form doesn't validate ownership or company boundary on submit | `app/dashboard/workflows/new/components/workflow-form.tsx` | P2 |
-| B-7 | `prisma/schema.prisma.bak` backup file may still be committed in repo root | repo root | P2 |
+Verified by reading the actual code, not the earlier summary. `PASS` = needs a fix before
+push; `RESOLVED` = no code change needed (hardening only).
+
+| # | Sev | Verdict | Root cause (evidence) | Fix owner |
+|---|---|---|---|---|
+| B-1 | P1 | CONFIRMED | `app/dashboard/workflows/[id]/page.tsx:1` is `"use client"` but `21a78ae` made it `async` + `await params` (`:27`,`:32`); async client components throw. `export const dynamic` (`:6`) is invalid in a client file. `app/api/workflows/[id]/route.ts:24-27` returns only `steps`, so trigger/run data is absent. | task agent |
+| B-2 | P2 | CONFIRMED | `components/workflow-list.tsx:7-15` and `app/dashboard/workflows/page.tsx:26-46` never select `WorkflowTrigger.cron` or `WorkflowRun.status/startedAt`. | task agent |
+| B-3 | P2 | CONFIRMED | `app/dashboard/page.tsx:196` hardcodes `Pending`; `:198` hardcodes `—`. `app/dashboard/assets/page.tsx` has no status column. `CompanyAsset` (`prisma/schema.prisma:110-126`) has no status field; tested-signal is `AgentFinding.assetId` (`:403-429`) + `AgentScanLink.source.coverage`. | task agent (derive; Batch 5 persists) |
+| B-4 | P1 | CONFIRMED | No create-group tool in `mssTools` (`lib/clin/cline-session.ts:487+`; siblings at `:3107`,`:3213`). `app/api/mss/asset-groups/route.ts:23-27` sets `companyId = session.userId` (User id where Company id required) → FK failure/wrong tenant. | task agent |
+| B-5 | P1 | CONFIRMED | `app/internal/scheduler/tick/route.ts:34` `getSession()` rejects the timer (401); `:41-43` only prefix-checks `Bearer ` (bypass); `app/api/workflows/route.ts:136` writes `nextRunAt: null` while `tick:50-53` queries `nextRunAt <= now` (NULL never matches); `Workflow` has no `agentPrompt` column so the tick sends a generic string; run status never leaves `pending`; `startClineSession` (`tick:99`) runs before the run step is created (`:109`). | task agent + owner (env/timer/db push) |
+| B-6 | P2 | PARTIAL | Ownership IS enforced server-side (`app/api/workflows/route.ts:68-88`). Real defects: 6-field cron in `workflow-form.tsx:54` vs 5-field parser `tick:6`; one-time cron `:57` also mismatches; no cron validation; form sends `companyId`/`userId`. | task agent |
+| B-7 | P2 | RESOLVED | `prisma/schema.prisma.bak` is not on disk and not tracked (`git ls-files` empty); added `ecc9bf3`, removed `579e62b`. Only add `*.bak` to `.gitignore`. | task agent (hardening) |
+| B-8 | P1 | CONFIRMED | `app/api/mss/workflows/[id]/route.ts:8`, `[id]/run/route.ts:8`, `runs/skip/route.ts:8`, `runs/route.ts:95,102` type `params` as `{ id: string }`; Next 16 passes a Promise → `id` undefined → Prisma 500. `runs/route.ts:95` exports dead `POSTretry`. | task agent |
+| B-9 | P2 | CONFIRMED | `app/api/mss/workflow-triggers/route.ts:35,41` and `runs/route.ts:33,116`, `runs/skip/route.ts:39` compare `workflow.companyId !== session.userId` (Company id vs User id). | task agent |
+| B-10 | P1 | CONFIRMED | Agent tool gaps: workflows only `list_workflows` + `save_workflow` (no prompt/trigger, no get/update/delete, no trigger CRUD, no run list/get/skip/retry, no manual run). No `list/create/rename/delete_asset_group`, no `delete_asset`, no `delete_report_document`. | task agent |
+| B-11 | P1 | CONFIRMED | Memory tools required by checklist §5 are not registered at all. `app/api/mss/memory/route.ts:23` uses `session.userId` as `companyId`; `:54` requires non-existent role `"agent"`; `:72` picks `companyId` via `Math.random()`. `app/api/mss/memory/review/route.ts` PATCH has no dynamic segment (`params.id` never set) + `console.error`. | task agent |
+
+Fix order: **B-4 -> B-11 -> B-5 -> B-10 -> B-1 -> B-8 -> B-9 -> B-3 -> B-2 -> B-6 -> B-7**.
+B-5 and B-10 both depend on `lib/workflows/cron.ts`, so implement cron first.
+Full spec: `task/TASK_258_SVE_FIX_REMAINING_BUGS_PROMPT.md`.
 
 ## 10. Next handoffs (queue)
 
@@ -245,6 +256,7 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 7. **Batch 3b workflows runtime — DEPLOYED.** Commits `ecc9bf3` + `a8a19e2` + `e0f5ae7` pushed to origin/main and deployed to VPS 207.244.224.57. `prisma db push` ran successfully on VPS — all 11 new tables confirmed (Workflow, WorkflowTrigger, WorkflowRun, WorkflowRunStep, WorkflowStep, MemoryNode, MemoryEdge, MemoryReview, PromptTemplate, InfraActionLog, ShieldKillSwitch). Service restarted. Dashboard `/dashboard` returns 307 (login redirect) instead of 500 error. Gates: prisma valid · tsc 0 · build 0. | SVE |
 8. **Batch 4 notifications — DEPLOYED.** Commits `3048e3f` + `69e7cf3` + `a82f9fc` pushed to origin/main and deployed. WP7.3 Notifications (outbox + Resend + prefs + approval links + needs-human flow). tsc 0 · build 0 · 0 console.log/transition-all/DSIH. | SVE |
 9. **Workflow form fix — PUSHED.** Commit `1343591` (workflow form: name + agent_prompt mandatory validation, light theme, graceful session handling). tsc 0 · build 0. Awaiting owner deploy trigger.
+10. **B-1..B-11 fix round — SCOPED, awaiting task agent.** SVE re-verified every reported bug against the code and found 4 additional defects (B-8 params Promise, B-9 company/user id confusion, B-10 missing agent tools, B-11 memory tools/API). Prompt: `task/TASK_258_SVE_FIX_REMAINING_BUGS_PROMPT.md` (B-1..B-11, exact file/line spec, tool matrix, 8-9 local commits, no push). Next: task agent implements -> SVE runs CP-1..CP-22 -> owner GO for push/db push/deploy.
 
 
 ---
@@ -270,6 +282,8 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 | 2026-11-24 | **Batch 3b dashboard fix — PUSHED.** Commit `4f324c9` (workflow form: Agent Prompt + Cron Schedule fields, light theme fix) pushed and deploy triggered (run 45318850925). Gates: tsc 0 · build 0. | SVE |
 | 2026-11-24 | **Batch 4 notifications — task agent complete, pushed `3048e3f` + `69e7cf3` + `a82f9fc`.** Prompt written at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. Outbox + Resend + prefs + approval links + needs-human flow. Depends on WP7.2 (deployed). Ready to issue to task agent. | SVE |
 | 2026-11-24 | **Workflow form fix — PUSHED commit `1343591`.** name + agent_prompt mandatory client-side validation, agent_prompt required in schema, graceful session handling (workflow still creates without session), error messages surfaced instead of generic "workflow creation failed". tsc 0 · build 0. Pushed to origin/main, awaiting deploy trigger. | SVE |
+| 2026-11-24 | **B-1..B-11 re-verified against code; 4 new bugs found (B-8..B-11).** B-1 root cause is `21a78ae` making a `"use client"` page async+`await params`. B-5 has 4 independent blockers (session gate, prefix-only bearer, `nextRunAt: null` never matching, no persisted `agentPrompt`). B-4 includes a User-id-as-Company-id bug in `/api/mss/asset-groups`. B-10/B-11 cover missing workflow/trigger/run/group/asset/report/memory tools. Prompt rewritten at `task/TASK_258_SVE_FIX_REMAINING_BUGS_PROMPT.md`. Awaiting task agent. | SVE |
+| 2026-11-24 | **B-1 fixed by SVE (task agent output rejected).** Task agent deleted `export default function WorkflowDetailPage`, imported `useParams` from `react`, left `await` in a non-async loader and referenced panels before declaration (`tsc` TS1005/TS1128). SVE restored correct page (`useParams`, sync component, triggers + 20 runs + agentPrompt), added `lib/workflows/cron.ts` (`parseCron`/`nextRunAt`/`describeCron`), added `Workflow.agentPrompt` to schema, extended `GET /api/workflows/[id]` with triggers/runs. Gates: prisma validate ok · generate ok · tsc 0 · build 0. Uncommitted. Remaining B-2..B-11 issued to task agent. | SVE |
 
 ---
 

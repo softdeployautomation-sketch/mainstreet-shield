@@ -85,7 +85,13 @@ export default async function DashboardPage() {
   const company = await db.company.findUnique({
     where: { userId: session.userId },
     include: {
-      assets: true,
+      assets: {
+        include: {
+          agentFindings: {
+            select: { createdAt: true },
+          },
+        },
+      },
       workflows: {
         include: { steps: { orderBy: { order: "asc" } } },
         orderBy: { updatedAt: "desc" },
@@ -193,9 +199,9 @@ export default async function DashboardPage() {
                       <td className="px-4 py-3 font-mono text-sm">{asset.target}</td>
                       <td className="px-4 py-3 text-xs font-mono text-fg-muted">{asset.type}</td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Pending</span>
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-400">{asset.agentFindings?.[0]?.status === "active" ? "Tested" : "Untested"}</span>
                       </td>
-                      <td className="px-4 py-3 text-xs font-mono text-fg-muted">—</td>
+                      <td className="px-4 py-3 text-xs font-mono text-fg-muted">{asset.agentFindings?.[0]?.createdAt ? new Date(asset.agentFindings[0].createdAt).toLocaleDateString() : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
