@@ -8,7 +8,7 @@ const workflowSchema = z.object({
   createdById: z.string().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
-  agent_prompt: z.string().optional(),
+  agent_prompt: z.string().min(1),
   cron: z.string().optional(),
   triggerType: z.enum(["daily", "one_time", "custom", "manual"]).optional(),
   dailyTime: z.string().optional(), // "HH:mm" for daily
@@ -142,58 +142,71 @@ export async function POST(req: Request) {
 
     // Create WorkflowRun + MssAgentSession if agent_prompt provided.
     if (agent_prompt) {
-      let session = await db.mssAgentSession.findFirst({
-        where: { userId: createdById },
-        orderBy: { createdAt: "desc" },
-      });
-      if (!session) {
-        session = await db.mssAgentSession.create({
-          data: {
-            userId: createdById,
-            title: `Workflow: ${name}`,
-          },
+      let session;
+      try {
+        session = await db.mssAgentSession.findFirst({
+          where: { userId: createdById },
+          orderBy: { createdAt: "desc" },
         });
+        if (!session) {
+          session = await db.mssAgentSession.create({
+            data: {
+              userId: createdById,
+              title: `Workflow: ${name}`,
+            },
+          });
+        }
+      } catch (sessionErr) {
+        // Session/table may not exist yet — workflow is still valid without it
+        session = undefined;
       }
 
-      const run = await db.workflowRun.create({
-        data: {
-          workflowId: workflow.id,
-          status: "pending",
-          sessionId: session.id,
-          startedAt: new Date(),
-        },
-        include: { session: true },
-      });
-
-      // Create initial agent_prompt step
-      await db.workflowRunStep.create({
-        data: {
-          runId: run.id,
-          name: "agent_prompt",
-          type: "agent_prompt",
-          status: "pending",
-          input: { prompt: agent_prompt },
-        },
-      });
-
-      // Store the initial agent_prompt as a ClineAgentMessage so the chat
-      // session history is available even if ClineCore loses its local transcript.
-      if (run.sessionId) {
-        await db.clineAgentMessage.create({
+      if (session) {
+        const run = await db.workflowRun.create({
           data: {
-            sessionId: run.sessionId,
-            userId: createdById,
-            role: "user",
-            content: { text: agent_prompt },
+            workflowId: workflow.id,
+            status: "pending",
+            sessionId: session.id,
+            startedAt: new Date(),
+          },
+          include: { session: true },
+        });
+
+        // Create initial agent_prompt step
+        await db.workflowRunStep.create({
+          data: {
+            runId: run.id,
+            name: "agent_prompt",
+            type: "agent_prompt",
+            status: "pending",
+            input: { prompt: agent_prompt },
           },
         });
+
+        // Store the initial agent_prompt as a ClineAgentMessage so the chat
+        // session history is available even if ClineCore loses its local transcript.
+        if (run.sessionId) {
+          try {
+            await db.clineAgentMessage.create({
+              data: {
+                sessionId: run.sessionId,
+                userId: createdById,
+                role: "user",
+                content: { text: agent_prompt },
+              },
+            });
+          } catch (msgErr) {
+            // ClineAgentMessage table may not exist yet — non-fatal
+          }
+        }
       }
     }
 
     return NextResponse.json({ ok: true, workflow });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "workflow creation failed";
     return NextResponse.json(
-      { error: "workflow creation failed" },
+      { error: msg },
       { status: 500 }
     );
   }

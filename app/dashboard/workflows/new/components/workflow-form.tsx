@@ -59,6 +59,18 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
         computedCron = customCron.trim();
       }
 
+      // Mandatory: name + agent_prompt. Trigger type is always set (defaults to manual).
+      if (!name.trim()) {
+        setError("Workflow name is required");
+        setSubmitting(false);
+        return;
+      }
+      if (!agentPrompt.trim()) {
+        setError("Agent prompt is required");
+        setSubmitting(false);
+        return;
+      }
+
       const res = await fetch("/api/workflows", {
         method: "POST",
         credentials: "same-origin",
@@ -68,7 +80,7 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
           createdById: userId,
           name: name.trim(),
           description: description.trim() || undefined,
-          agent_prompt: agentPrompt.trim() || undefined,
+          agent_prompt: agentPrompt.trim(),
           cron: computedCron,
           triggerType,
           dailyTime: triggerType === "daily" ? dailyTime : undefined,
@@ -244,10 +256,9 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
                 <input
                   name={`steps[${i}].name`}
                   type="text"
-                  required
                   value={stepNames[i] ?? ""}
                   onChange={(e) => setStep(i, "name", e.target.value)}
-                  placeholder={`Step ${i + 1} name`}
+                  placeholder={`Step ${i + 1} name (optional)`}
                   className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm text-fg"
                 />
                 <input
