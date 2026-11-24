@@ -109,7 +109,7 @@ export function WorkflowList({ workflows }: { workflows: WorkflowListItem[] }) {
                       if (e.key === "Enter") void saveRename(w.id);
                       if (e.key === "Escape") setEditingId(null);
                     }}
-                    className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100"
+                    className="flex-1 rounded border border-bg bg-bg-elevated px-3 py-1.5 text-sm text-fg"
                     autoFocus
                   />
                   <button
