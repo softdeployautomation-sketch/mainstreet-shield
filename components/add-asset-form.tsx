@@ -104,6 +104,7 @@ export function AddAssetForm() {
           <option value="api">API</option>
           <option value="network">Network</option>
           <option value="mobile">Mobile</option>
+          <option value="others">Others</option>
         </select>
       </div>
       <div>

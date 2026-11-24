@@ -30,6 +30,7 @@ export default async function AgentPage({
   let mssSession: { id: string; userId: string; title: string | null; status: string; createdAt: Date } | null = null;
   let run: { id: string; workflowId: string; triggerId: string | null; status: string; startedAt: Date | null; endedAt: Date | null } | null = null;
   let steps: { id: string; name: string; type: string; status: string; input: any; output: any | null; startedAt: Date | null; endedAt: Date | null; error: string | null }[] = [];
+  let messages: { role: string; content: any; createdAt: Date }[] = [];
   let workflowName = "";
   let agentPrompt = "";
 
@@ -41,6 +42,7 @@ export default async function AgentPage({
         const wf = await db.workflow.findUnique({ where: { id: run.workflowId }, select: { name: true, agentPrompt: true } });
         if (wf) { workflowName = wf.name; agentPrompt = wf.agentPrompt ?? ""; }
         steps = await db.workflowRunStep.findMany({ where: { runId: run.id }, orderBy: { id: "asc" } });
+        messages = await db.clineAgentMessage.findMany({ where: { sessionId: mssSession.id }, orderBy: { createdAt: "asc" } });
       }
     }
   }
@@ -80,6 +82,23 @@ export default async function AgentPage({
                 </div>
               ) : (
                 <div className="text-fg-muted italic">No agent prompt available.</div>
+              )}
+              {messages.length > 0 ? (
+                <div className="flex flex-col gap-2 pt-4 border-t border-border/30">
+                  <div className="text-[10px] font-mono text-fg-muted uppercase mb-1">Conversation</div>
+                  {messages.map((m) => (
+                    <div key={m.createdAt.getTime() + m.role} className="flex flex-col gap-1 pt-2 border-t border-border/30">
+                      <div className={`text-[10px] font-mono uppercase mb-1 ${m.role === "user" ? "text-brand-600" : "text-emerald-500"}`}>
+                        {m.role === "user" ? "You" : "Agent"}
+                      </div>
+                      <div className={`text-sm whitespace-pre-wrap ${m.role === "user" ? "text-fg" : "text-emerald-400"}`}>
+                        {typeof m.content === "string" ? m.content : JSON.stringify(m.content, null, 2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-fg-muted italic pt-4 border-t border-border/30">No conversation yet.</div>
               )}
               {steps.length > 0 ? (
                 steps.map((step) => (

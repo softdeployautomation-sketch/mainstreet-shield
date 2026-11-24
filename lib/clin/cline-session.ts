@@ -3700,6 +3700,165 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
       },
     },
 
+    {
+      name: "mss_create_workflow_run",
+      description: "Create a workflow run for a workflow owned by the user's company. Input: { workflowId }. Verifies ownership (C1). Creates WorkflowRun with status 'pending' and startedAt now, creates MssAgentSession, links sessionId to run, creates agent_prompt step from workflow.agentPrompt. Returns { runId, sessionId, status }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string", description: "Workflow id to run" },
+        },
+        required: ["workflowId"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { workflowId } = input as { workflowId: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const workflow = await db.workflow.findUnique({ where: { id: workflowId } });
+        if (!workflow) return { error: "workflow_not_found" };
+        if (workflow.companyId !== company.id) return { error: "forbidden" };
+        const now = new Date();
+        const run = await db.workflowRun.create({
+          data: {
+            workflowId,
+            status: "pending",
+            startedAt: now,
+          },
+        });
+        const session = await db.mssAgentSession.create({
+          data: {
+            userId,
+            title: `Workflow run ${run.id} — ${workflow.name}`,
+            status: "active",
+          },
+        });
+        await db.workflowRun.update({
+          where: { id: run.id },
+          data: { sessionId: session.id },
+        });
+        const prompt = workflow.agentPrompt?.trim() || `Workflow "${workflow.name}" has been triggered. Please process the steps defined in this workflow.`;
+        await db.workflowRunStep.create({
+          data: {
+            runId: run.id,
+            name: "agent_prompt",
+            type: "agent_prompt",
+            status: "pending",
+            input: { message: prompt, workflowId },
+          },
+        });
+        return { runId: run.id, sessionId: session.id, status: run.status };
+      },
+    },
+
+    {
+      name: "mss_create_asset_group",
+      description: "Create a new asset group owned by the user's company. Input: { name }. Trims name, rejects empty, dedupes on (companyId, name). Returns { ok, group, existed }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Asset group name" },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { name } = input as { name: string };
+        const trimmed = name.trim();
+        if (!trimmed) return { error: "name_required" };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const existing = await db.companyAssetGroup.findFirst({
+          where: { companyId: company.id, name: trimmed },
+        });
+        if (existing) return { ok: true, group: existing, existed: true };
+        const group = await db.companyAssetGroup.create({
+          data: { companyId: company.id, name: trimmed },
+        });
+        return { ok: true, group, existed: false };
+      },
+    },
+
+    {
+      name: "mss_create_workflow_trigger",
+      description: "Create a workflow trigger with cron schedule. Input: { workflowId, cron, enabled? }. Validates cron (5-field expression), sets nextRunAt, max 5 active per company. Returns { triggerId, nextRunAt }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workflowId: { type: "string", description: "Workflow id to trigger" },
+          cron: { type: "string", description: "5-field cron expression (e.g. '30 14 * * *')" },
+          enabled: { type: "boolean", description: "Whether trigger is enabled" },
+        },
+        required: ["workflowId", "cron"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { workflowId, cron, enabled } = input as { workflowId: string; cron: string; enabled?: boolean };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const workflow = await db.workflow.findUnique({ where: { id: workflowId } });
+        if (!workflow) return { error: "workflow_not_found" };
+        if (workflow.companyId !== company.id) return { error: "forbidden" };
+
+        const fields = cron.trim().split(/\s+/);
+        if (fields.length !== 5) return { error: "invalid_cron" };
+
+        if (enabled !== false) {
+          const activeCount = await db.workflowTrigger.count({
+            where: { workflow: { companyId: company.id }, enabled: true },
+          });
+          if (activeCount >= 5) return { error: "trigger_cap_reached" };
+        }
+
+        const now = new Date();
+        const { nextRunAt } = await import("@/lib/workflows/cron");
+        const computedNext = nextRunAt(cron, now);
+        const trigger = await db.workflowTrigger.create({
+          data: {
+            workflowId,
+            cron: cron.trim(),
+            enabled: enabled ?? true,
+            nextRunAt: computedNext,
+            maxRuns: -1,
+            runsDone: 0,
+          },
+        });
+        return { triggerId: trigger.id, nextRunAt: trigger.nextRunAt };
+      },
+    },
+
+    {
+      name: "mss_send_email",
+      description: "Send an email via instaweb mail. Input: { to, subject, body, html? }. Verifies user's company exists. Creates a Notification row with channel 'email' and status 'pending'. Returns { notificationId, status }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          to: { type: "string", description: "Recipient email address" },
+          subject: { type: "string", description: "Email subject" },
+          body: { type: "string", description: "Email body (plain text)" },
+          html: { type: "string", description: "Optional HTML body" },
+        },
+        required: ["to", "subject", "body"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { to, subject, body, html } = input as { to: string; subject: string; body: string; html?: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const notification = await db.notification.create({
+          data: {
+            userId,
+            type: "system_alert",
+            channel: "email",
+            status: "pending",
+            subject,
+            body: html ?? body,
+            metadata: { to, html, companyId: company.id },
+          },
+        });
+        return { notificationId: notification.id, status: notification.status };
+      },
+    },
   ];
 }
 

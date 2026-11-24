@@ -5,6 +5,7 @@ import {
   FileText,
   MonitorPlay,
   Settings,
+  CheckCircle2,
 } from "lucide-react";
 
 export interface NavItem {
@@ -19,6 +20,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/assets", label: "Assets", icon: Boxes },
+  { href: "/dashboard/workflows", label: "Workflows", icon: CheckCircle2 },
   {
     href: "/dashboard/findings",
     label: "Findings",

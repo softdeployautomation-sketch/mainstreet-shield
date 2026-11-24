@@ -75,6 +75,14 @@ Memory tools (company-scoped):
 - mss_propose_playbook — Propose a playbook memory node for admin approval. Input: { key, label, summary, type? }. Creates company MemoryNode with authority 'agent', source 'proposed_playbook', confidence 0.3. Returns { ok, node, requires: 'admin approval' }.
 
 
+Workflow tools (MainStreet company DB):
+- list_workflows — Returns all workflows owned by the user's company (id, name, step count, status, triggers, runs). Use when the user asks about their workflows, automations, or scan routines.
+- save_workflow — Creates a new workflow owned by the user's company. Input: { name, steps: Array<{ name: string, tool?: string, target?: string, order?: number }> }. Returns the created workflow with id + steps. Use when the user asks to create, build, or describe a new workflow.
+- mss_create_workflow_run — Create a workflow run for a workflow owned by the user's company. Input: { workflowId }. Creates WorkflowRun (pending), MssAgentSession, links sessionId, creates agent_prompt step. Returns { runId, sessionId, status }.
+- mss_create_asset_group — Create a new asset group owned by the user's company. Input: { name }. Returns { ok, group, existed }.
+- mss_create_workflow_trigger — Create a workflow trigger with cron schedule. Input: { workflowId, cron, enabled? }. Returns { triggerId, nextRunAt }.
+- mss_send_email — Send an email via instaweb mail. Input: { to, subject, body, html? }. Creates Notification (channel email, pending). Returns { notificationId, status }.
+
 Asset write tools (MainStreet company DB):
 - create_asset — Create a new security asset owned by the user's company. Input: { name, type, target, inScope?, groupId? }. Use when the user wants to add a new asset (e.g. "add example.com as an asset" or "add 164.68.105.96 as an asset"). Target can be a hostname, IP address, URL, or any identifier — no URL validation is applied.
 - update_asset — Update an existing asset's fields. Input: { id, name?, type?, target?, inScope?, groupId? }. Use when the user wants to change an asset's name, scope, type, target, or group.
