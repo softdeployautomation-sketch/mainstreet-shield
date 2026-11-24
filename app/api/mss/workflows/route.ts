@@ -150,3 +150,90 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 }
+
+// PUT /api/mss/workflows/[id] — Update a workflow
+export async function PUT(req: Request) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "workflowId is required" }, { status: 400 });
+    }
+
+    // Check workflow exists and get its company
+    const workflow = await db.workflow.findUnique({
+      where: { id },
+      include: { company: true },
+    });
+
+    if (!workflow) {
+      return NextResponse.json({ error: "workflow not found" }, { status: 404 });
+    }
+
+    // Check ownership
+    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+      return NextResponse.json({ error: "access denied" }, { status: 403 });
+    }
+
+    // Update the workflow
+    const { name, description } = await req.json();
+    const updatedWorkflow = await db.workflow.update({
+      where: { id },
+      data: {
+        name: name || workflow.name,
+        description: description !== undefined ? description : workflow.description,
+      },
+    });
+
+    return NextResponse.json(updatedWorkflow);
+  } catch (error) {
+    return NextResponse.json({ error: "internal error" }, { status: 500 });
+  }
+}
+
+// DELETE /api/mss/workflows/[id] — Delete a workflow
+export async function DELETE(req: Request) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "workflowId is required" }, { status: 400 });
+    }
+
+    // Check workflow exists and get its company
+    const workflow = await db.workflow.findUnique({
+      where: { id },
+      include: { company: true },
+    });
+
+    if (!workflow) {
+      return NextResponse.json({ error: "workflow not found" }, { status: 404 });
+    }
+
+    // Check ownership
+    if (workflow.companyId && workflow.companyId !== session.userId && session.role !== "admin") {
+      return NextResponse.json({ error: "access denied" }, { status: 403 });
+    }
+
+    // Delete the workflow (cascading delete will handle triggers, steps, runs)
+    await db.workflow.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: "internal error" }, { status: 500 });
+  }
+}
