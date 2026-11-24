@@ -10,6 +10,9 @@ const workflowSchema = z.object({
   description: z.string().optional(),
   agent_prompt: z.string().optional(),
   cron: z.string().optional(),
+  triggerType: z.enum(["daily", "one_time", "custom", "manual"]).optional(),
+  dailyTime: z.string().optional(), // "HH:mm" for daily
+  oneTimeDateTime: z.string().optional(), // ISO for one-time
   enabled: z.boolean().optional(),
   steps: z
     .array(
@@ -58,7 +61,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let { companyId, name, description, agent_prompt, cron, enabled, steps } = data.data;
+    let { companyId, name, description, agent_prompt, cron, triggerType, dailyTime, oneTimeDateTime, enabled, steps } = data.data;
 
     // Always resolve/verify company from the session. Never trust a
     // client-supplied companyId without an ownership check (regression guard).
@@ -84,6 +87,25 @@ export async function POST(req: Request) {
     // createdById always comes from the authenticated session.
     const createdById = session.userId;
 
+    // Compute cron from trigger type (server-side validation).
+    let computedCron: string | undefined;
+    let maxRuns = -1; // unlimited by default
+    if (triggerType === "daily" && dailyTime) {
+      const [hh, mm] = dailyTime.split(":");
+      computedCron = `0 ${mm} ${hh} * * *`;
+    } else if (triggerType === "one_time" && oneTimeDateTime) {
+      const dt = new Date(oneTimeDateTime);
+      if (!isNaN(dt.getTime())) {
+        computedCron = `${dt.getUTCMinutes()} ${dt.getUTCHours()} ${dt.getUTCDate()} ${dt.getUTCMonth() + 1} *`;
+        maxRuns = 1; // one-time trigger
+      }
+    } else if (triggerType === "custom" && cron?.trim()) {
+      computedCron = cron.trim();
+    } else if (cron?.trim()) {
+      // Legacy: cron provided without triggerType
+      computedCron = cron.trim();
+    }
+
     const workflow = await db.workflow.create({
       data: {
         companyId,
@@ -104,15 +126,16 @@ export async function POST(req: Request) {
       include: { steps: { orderBy: { order: "asc" } } },
     });
 
-    // Create WorkflowTrigger if cron provided (user-set schedule).
-    if (cron) {
+    // Create WorkflowTrigger if cron computed (user-set schedule).
+    if (computedCron) {
       await db.workflowTrigger.create({
         data: {
           workflowId: workflow.id,
-          cron: cron.trim(),
+          cron: computedCron,
           enabled: enabled ?? true,
           nextRunAt: null, // scheduler tick will compute
           runsDone: 0,
+          maxRuns,
         },
       });
     }
@@ -152,6 +175,19 @@ export async function POST(req: Request) {
           input: { prompt: agent_prompt },
         },
       });
+
+      // Store the initial agent_prompt as a ClineAgentMessage so the chat
+      // session history is available even if ClineCore loses its local transcript.
+      if (run.sessionId) {
+        await db.clineAgentMessage.create({
+          data: {
+            sessionId: run.sessionId,
+            userId: createdById,
+            role: "user",
+            content: { text: agent_prompt },
+          },
+        });
+      }
     }
 
     return NextResponse.json({ ok: true, workflow });
