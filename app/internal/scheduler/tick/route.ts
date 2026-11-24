@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { startClineSession } from "@/lib/clin/cline-session";
 
 const CRON_PATTERN = /^(\d+|\*)\s+(\d+|\*)\s+\*\s+\*\s+(\d+|\*)$/;
@@ -29,37 +29,70 @@ function computeNextRun(cron: string, lastRunAt: Date): Date {
   return next;
 }
 
+export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    // Auth: check SCHEDULER_TOKEN env var and bearer header
+    const schedulerToken = process.env.SCHEDULER_TOKEN;
+
+    if (!schedulerToken) {
+      return NextResponse.json({ error: "scheduler_not_configured" }, { status: 503 });
     }
 
-    // Only internal calls - check for internal auth header
     const authHeader = req.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "internal endpoint requires bearer token" }, { status: 403 });
+      return NextResponse.json({ error: "internal endpoint requires bearer token" }, { status: 401 });
     }
 
-    // Claim all enabled triggers where nextRunAt <= now
+    const providedToken = authHeader.substring("Bearer ".length);
+    if (!timingSafeEqual(Buffer.from(schedulerToken), Buffer.from(providedToken))) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
     const now = new Date();
-    const enabledTriggers = await db.workflowTrigger.findMany({
+
+    // Due query: enabled triggers where nextRunAt <= now OR nextRunAt is null
+    const dueTriggers = await db.workflowTrigger.findMany({
       where: {
         enabled: true,
-        nextRunAt: {
-          lte: now,
-        },
+        OR: [{ nextRunAt: { lte: now } }, { nextRunAt: null }],
       },
       include: {
-        workflow: true,
+        workflow: {
+          include: {
+            company: true,
+          },
+        },
       },
     });
 
     const runsCreated: any[] = [];
 
-    for (const trigger of enabledTriggers) {
-      // Create the workflow run (manual-like but with triggerId)
+    for (const trigger of dueTriggers) {
+      // Skip archived workflows
+      if (trigger.workflow.status === "archived") {
+        // Still update nextRunAt so they can be re-enabled later
+        const nextRunAt = computeNextRun(trigger.cron, now);
+        await db.workflowTrigger.update({
+          where: { id: trigger.id },
+          data: { nextRunAt },
+        });
+        continue;
+      }
+
+      // Check maxRuns limit
+      if (trigger.maxRuns !== -1 && trigger.runsDone >= trigger.maxRuns) {
+        await db.workflowTrigger.update({
+          where: { id: trigger.id },
+          data: { enabled: false },
+        });
+        continue;
+      }
+
+      // Compute next run time
+      const nextRunAt = computeNextRun(trigger.cron, now);
+
+      // Create workflow run (manual-like but with triggerId)
       const run = await db.workflowRun.create({
         data: {
           workflowId: trigger.workflowId,
@@ -92,20 +125,6 @@ export async function POST(req: Request) {
         data: { sessionId: mssSession.id },
       });
 
-      // Kick off the agent by starting a ClineCore session with the initial
-      // prompt so it starts processing immediately instead of waiting for a
-      // user message.
-      try {
-        await startClineSession({
-          sessionId: mssSession.id,
-          userId: trigger.workflow.createdById || "",
-          prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule. Please process the steps defined in this workflow.`,
-          resume: true,
-        });
-      } catch {
-        // Non-fatal: the run/step already exist, the user can still open the chat.
-      }
-
       // Create initial agent_prompt step
       await db.workflowRunStep.create({
         data: {
@@ -120,16 +139,35 @@ export async function POST(req: Request) {
         },
       });
 
-      // Update trigger: lastRunAt = now, runsDone += 1, recalculate nextRunAt
-      const nextRunAt = computeNextRun(trigger.cron, now);
-      await db.workflowTrigger.update({
-        where: { id: trigger.id },
+      // Kick off the agent by starting a ClineCore session
+      try {
+        await startClineSession({
+          sessionId: mssSession.id,
+          userId: trigger.workflow.createdById || "",
+          prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule. Please process the steps defined in this workflow.`,
+          resume: true,
+        });
+      } catch {
+        // Non-fatal: the run/step already exist, the user can still open the chat.
+      }
+
+      // Claim atomically: update trigger with lastRunAt, runsDone increment, nextRunAt
+      const claimed = await db.workflowTrigger.updateMany({
+        where: {
+          id: trigger.id,
+          enabled: true,
+          OR: [{ nextRunAt: { lte: now } }, { nextRunAt: null }],
+        },
         data: {
           lastRunAt: now,
           runsDone: { increment: 1 },
           nextRunAt,
         },
       });
+
+      if (claimed.count === 0) {
+        continue;
+      }
 
       runsCreated.push({
         runId: run.id,
