@@ -24,13 +24,17 @@ export default async function WorkflowsPage() {
     where: { userId: session.userId },
     include: {
       workflows: {
-        include: { steps: { orderBy: { order: "asc" } } },
+        include: {
+          steps: { orderBy: { order: "asc" } },
+          workflowTriggers: { orderBy: { id: "asc" }, take: 1 },
+          workflowRuns: { orderBy: { startedAt: "desc" }, take: 1 },
+        },
         orderBy: { updatedAt: "desc" },
       },
     },
   });
 
-  const workflows: WorkflowListItem[] = (company?.workflows ?? []).map((w) => ({
+  const workflows = (company?.workflows ?? []).map((w) => ({
     id: w.id,
     name: w.name,
     description: w.description,
@@ -42,8 +46,12 @@ export default async function WorkflowsPage() {
       name: s.name,
       tool: s.tool,
       status: s.status,
-    })),
-  }));
+    })) as any,
+    trigger: w.workflowTriggers?.[0] || null,
+    lastRun: (w.workflowRuns?.[0] as any)
+      ? { status: (w.workflowRuns[0] as any).status, startedAt: (w.workflowRuns[0] as any).startedAt.toISOString() }
+      : null,
+  })) as WorkflowListItem[];
 
   const canCreate =
     pw.user.tier === "5" || pw.user.role === "admin" || workflows.length >= 0;

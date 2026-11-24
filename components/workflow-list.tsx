@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { describeCron } from "@/lib/workflows/cron";
 
 export interface WorkflowListItem {
   id: string;
@@ -12,6 +13,8 @@ export interface WorkflowListItem {
   createdAt: string;
   updatedAt: string;
   steps: { id: string; name: string; tool: string | null; status: string }[];
+  trigger: { cron: string; enabled: boolean } | null;
+  lastRun: { status: string; startedAt: string | null } | null;
 }
 
 /**
@@ -153,6 +156,36 @@ export function WorkflowList({ workflows }: { workflows: WorkflowListItem[] }) {
               {w.description ? (
                 <p className="mt-1 text-xs text-fg-muted truncate">{w.description}</p>
               ) : null}
+              <div className="flex items-center gap-2 text-xs text-fg-muted">
+                {w.trigger ? (
+                  <span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${w.trigger.enabled ? "bg-emerald-500" : "bg-rose-500"} opacity-80`}
+                    />
+                    {describeCron(w.trigger.cron)}
+                  </span>
+                ) : (
+                  <span>Manual</span>
+                )}
+                {w.lastRun ? (
+                  <span>
+                    <span
+                      className={
+                        w.lastRun.status === "completed"
+                          ? "w-1.5 h-1.5 rounded-full bg-emerald-500 opacity-80"
+                          : w.lastRun.status === "failed"
+                            ? "w-1.5 h-1.5 rounded-full bg-rose-500 opacity-80"
+                            : w.lastRun.status === "needs_human"
+                              ? "w-1.5 h-1.5 rounded-full bg-amber-500 opacity-80"
+                              : "w-1.5 h-1.5 rounded-full bg-fg-muted opacity-80"
+                      }
+                    />
+                    {w.lastRun.startedAt ? new Date(w.lastRun.startedAt).toLocaleDateString() : "—"}
+                  </span>
+                ) : (
+                  <span>Never run</span>
+                )}
+              </div>
             </div>
             <div className="flex gap-3 shrink-0">
               <Link
