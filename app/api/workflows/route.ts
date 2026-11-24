@@ -8,6 +8,9 @@ const workflowSchema = z.object({
   createdById: z.string().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
+  agent_prompt: z.string().optional(),
+  cron: z.string().optional(),
+  enabled: z.boolean().optional(),
   steps: z
     .array(
       z.object({
@@ -55,7 +58,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let { companyId, name, description, steps } = data.data;
+    let { companyId, name, description, agent_prompt, cron, enabled, steps } = data.data;
 
     // Always resolve/verify company from the session. Never trust a
     // client-supplied companyId without an ownership check (regression guard).
@@ -100,6 +103,56 @@ export async function POST(req: Request) {
       },
       include: { steps: { orderBy: { order: "asc" } } },
     });
+
+    // Create WorkflowTrigger if cron provided (user-set schedule).
+    if (cron) {
+      await db.workflowTrigger.create({
+        data: {
+          workflowId: workflow.id,
+          cron: cron.trim(),
+          enabled: enabled ?? true,
+          nextRunAt: null, // scheduler tick will compute
+          runsDone: 0,
+        },
+      });
+    }
+
+    // Create WorkflowRun + MssAgentSession if agent_prompt provided.
+    if (agent_prompt) {
+      let session = await db.mssAgentSession.findFirst({
+        where: { userId: createdById },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!session) {
+        session = await db.mssAgentSession.create({
+          data: {
+            userId: createdById,
+            title: `Workflow: ${name}`,
+          },
+        });
+      }
+
+      const run = await db.workflowRun.create({
+        data: {
+          workflowId: workflow.id,
+          status: "pending",
+          sessionId: session.id,
+          startedAt: new Date(),
+        },
+        include: { session: true },
+      });
+
+      // Create initial agent_prompt step
+      await db.workflowRunStep.create({
+        data: {
+          runId: run.id,
+          name: "agent_prompt",
+          type: "agent_prompt",
+          status: "pending",
+          input: { prompt: agent_prompt },
+        },
+      });
+    }
 
     return NextResponse.json({ ok: true, workflow });
   } catch (err) {
