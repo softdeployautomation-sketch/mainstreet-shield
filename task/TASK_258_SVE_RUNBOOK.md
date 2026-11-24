@@ -230,7 +230,8 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 6. **Batch 2 memory — PUSHED — `afb05d8`.** Evidence-gated Postgres graph (MemoryNode/MemoryEdge/MemoryReview) per D18–D24. Schema + API only, no db push. Committed locally then pushed to origin/main. Gates: prisma valid · tsc 0 · build 0. Awaiting owner build trigger/deploy.
 
 7. **Batch 3b workflows runtime — DEPLOYED.** Commits `ecc9bf3` + `a8a19e2` + `e0f5ae7` pushed to origin/main and deployed to VPS 207.244.224.57. `prisma db push` ran successfully on VPS — all 11 new tables confirmed (Workflow, WorkflowTrigger, WorkflowRun, WorkflowRunStep, WorkflowStep, MemoryNode, MemoryEdge, MemoryReview, PromptTemplate, InfraActionLog, ShieldKillSwitch). Service restarted. Dashboard `/dashboard` returns 307 (login redirect) instead of 500 error. Gates: prisma valid · tsc 0 · build 0. | SVE |
-8. **Batch 4 notifications — SCOPED.** Prompt at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. WP7.3 Notifications (outbox + Resend + prefs + approval links + needs-human flow). Depends on WP7.2 (Batch 3 deployed). Ready to issue to task agent.
+8. **Batch 4 notifications — DEPLOYED.** Commits `3048e3f` + `69e7cf3` + `a82f9fc` pushed to origin/main and deployed. WP7.3 Notifications (outbox + Resend + prefs + approval links + needs-human flow). tsc 0 · build 0 · 0 console.log/transition-all/DSIH. | SVE |
+9. **Workflow form fix — PUSHED.** Commit `1343591` (workflow form: name + agent_prompt mandatory validation, light theme, graceful session handling). tsc 0 · build 0. Awaiting owner deploy trigger.
 
 
 ---
@@ -254,7 +255,8 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 | 2026-11-23 | **Cline auth mid-session fix committed locally — `6b679b3`** | Force-refreshes OAuth token on 401 during `core.start()`/`core.send()` and retries once. Prevents "Unauthorized ... re-authenticate" mid-scan. tsc 0 · build success · 0 console.log/transition-all/DSIH. Awaiting owner push/deploy. | SVE |
 | 2026-11-24 | **Batch 3b workflows runtime — DEPLOYED.** Commits `ecc9bf3` + `a8a19e2` + `e0f5ae7` deployed to VPS 207.244.224.57. `prisma db push` ran — all 11 new tables confirmed (Workflow, WorkflowTrigger, WorkflowRun, WorkflowRunStep, WorkflowStep, MemoryNode, MemoryEdge, MemoryReview, PromptTemplate, InfraActionLog, ShieldKillSwitch). Service restarted. Dashboard `/dashboard` returns 307 (login redirect) instead of 500 error. Gates: prisma valid · tsc 0 · build 0. | SVE |
 | 2026-11-24 | **Batch 3b dashboard fix — PUSHED.** Commit `4f324c9` (workflow form: Agent Prompt + Cron Schedule fields, light theme fix) pushed and deploy triggered (run 45318850925). Gates: tsc 0 · build 0. | SVE |
-| 2026-11-24 | **Batch 4 notifications — task agent complete, pushed `3048e3f` + `69e7cf3`.** Prompt written at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. Outbox + Resend + prefs + approval links + needs-human flow. Depends on WP7.2 (deployed). Ready to issue to task agent. | SVE |
+| 2026-11-24 | **Batch 4 notifications — task agent complete, pushed `3048e3f` + `69e7cf3` + `a82f9fc`.** Prompt written at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. Outbox + Resend + prefs + approval links + needs-human flow. Depends on WP7.2 (deployed). Ready to issue to task agent. | SVE |
+| 2026-11-24 | **Workflow form fix — PUSHED commit `1343591`.** name + agent_prompt mandatory client-side validation, agent_prompt required in schema, graceful session handling (workflow still creates without session), error messages surfaced instead of generic "workflow creation failed". tsc 0 · build 0. Pushed to origin/main, awaiting deploy trigger. | SVE |
 
 ---
 
