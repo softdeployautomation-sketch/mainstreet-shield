@@ -254,7 +254,7 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 | 2026-11-23 | **Cline auth mid-session fix committed locally — `6b679b3`** | Force-refreshes OAuth token on 401 during `core.start()`/`core.send()` and retries once. Prevents "Unauthorized ... re-authenticate" mid-scan. tsc 0 · build success · 0 console.log/transition-all/DSIH. Awaiting owner push/deploy. | SVE |
 | 2026-11-24 | **Batch 3b workflows runtime — DEPLOYED.** Commits `ecc9bf3` + `a8a19e2` + `e0f5ae7` deployed to VPS 207.244.224.57. `prisma db push` ran — all 11 new tables confirmed (Workflow, WorkflowTrigger, WorkflowRun, WorkflowRunStep, WorkflowStep, MemoryNode, MemoryEdge, MemoryReview, PromptTemplate, InfraActionLog, ShieldKillSwitch). Service restarted. Dashboard `/dashboard` returns 307 (login redirect) instead of 500 error. Gates: prisma valid · tsc 0 · build 0. | SVE |
 | 2026-11-24 | **Batch 3b dashboard fix — PUSHED.** Commit `4f324c9` (workflow form: Agent Prompt + Cron Schedule fields, light theme fix) pushed and deploy triggered (run 45318850925). Gates: tsc 0 · build 0. | SVE |
-| 2026-11-24 | **Batch 4 scoped — WP7.3 Notifications.** Prompt written at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. Outbox + Resend + prefs + approval links + needs-human flow. Depends on WP7.2 (deployed). Ready to issue to task agent. | SVE |
+| 2026-11-24 | **Batch 4 notifications — task agent complete, pushed `3048e3f` + `69e7cf3`.** Prompt written at `task/TASK_258_SVE_BATCH4_NOTIFICATIONS_PROMPT.md`. Outbox + Resend + prefs + approval links + needs-human flow. Depends on WP7.2 (deployed). Ready to issue to task agent. | SVE |
 
 ---
 
