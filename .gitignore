@@ -32,4 +32,5 @@ prisma/migrations/
 .vercel
 
 # TypeScript
-*.tsbuildinfo*.bak
+*.tsbuildinfo
+*.bak
