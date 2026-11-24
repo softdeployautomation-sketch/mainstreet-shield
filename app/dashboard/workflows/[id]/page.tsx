@@ -297,7 +297,7 @@ export default function WorkflowDetailPage() {
               </div>
               {run.sessionId ? (
                 <Link
-                  href={`/dashboard?session=${encodeURIComponent(run.sessionId)}`}
+                  href={`/agent?session=${encodeURIComponent(run.sessionId)}`}
                   className="text-xs font-mono text-brand-600 hover:text-brand-400"
                 >
                   chat →

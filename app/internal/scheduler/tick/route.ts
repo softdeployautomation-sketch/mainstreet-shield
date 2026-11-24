@@ -72,8 +72,8 @@ export async function POST(req: Request) {
     const runsCreated: any[] = [];
 
     for (const trigger of dueTriggers) {
-      // Skip archived workflows
-      if (trigger.workflow.status === "archived") {
+      // Skip non-active workflows (draft, archived, etc.)
+      if (trigger.workflow.status !== "active") {
         // Still update nextRunAt so they can be re-enabled later
         const nextRunAt = computeNextRun(trigger.cron, now);
         await db.workflowTrigger.update({
@@ -136,7 +136,7 @@ export async function POST(req: Request) {
           type: "agent_prompt",
           status: "pending",
           input: {
-            message: `Workflow "${trigger.workflow.name}" has been triggered on schedule. Please process the steps defined in this workflow.`,
+            message: `Workflow "${trigger.workflow.name}" has been triggered on schedule (one-time). No workflow steps are defined — you have full authority to decide the next action based on available context. If human confirmation is needed, trigger a Telegram notification.`,
             workflowId: trigger.workflowId,
           },
         },
@@ -147,7 +147,7 @@ export async function POST(req: Request) {
         await startClineSession({
           sessionId: mssSession.id,
           userId: trigger.workflow.createdById || "",
-          prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule. Please process the steps defined in this workflow.`,
+          prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule (one-time). No workflow steps are defined — you have full authority to decide the next action based on available context. If human confirmation is needed, trigger a Telegram notification.`,
           resume: true,
         });
       } catch {
