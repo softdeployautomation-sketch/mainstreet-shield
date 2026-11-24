@@ -103,7 +103,8 @@ export async function POST(req: Request) {
         data: { sessionId: mssSession.id },
       });
 
-      // Create initial agent_prompt step
+      // Create initial agent_prompt step — use the workflow's agentPrompt if set
+      const agentPrompt = trigger.workflow.agentPrompt?.trim() || `Workflow "${trigger.workflow.name}" has been triggered on schedule. Please process the steps defined in this workflow.`;
       await db.workflowRunStep.create({
         data: {
           runId: run.id,
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
           type: "agent_prompt",
           status: "pending",
           input: {
-            message: `Workflow "${trigger.workflow.name}" has been triggered on schedule (one-time). No workflow steps are defined — you have full authority to decide the next action based on available context. If human confirmation is needed, trigger a Telegram notification.`,
+            message: agentPrompt,
             workflowId: trigger.workflowId,
           },
         },
@@ -126,7 +127,7 @@ export async function POST(req: Request) {
         const result = await startClineSession({
           sessionId: mssSession.id,
           userId: trigger.workflow.createdById || "",
-          prompt: `Workflow "${trigger.workflow.name}" has been triggered on schedule (one-time). No workflow steps are defined — you have full authority to decide the next action based on available context. If human confirmation is needed, trigger a Telegram notification.`,
+          prompt: agentPrompt,
           resume: true,
         });
 
@@ -166,7 +167,7 @@ export async function POST(req: Request) {
       });
 
       // Claim atomically: update trigger with lastRunAt, runsDone increment, nextRunAt
-      // For one-time triggers (maxRuns: 1), don't set nextRunAt — trigger will be disabled
+      // For one-time triggers (maxRuns: 1), disable the trigger — no more runs will fire
       const isLastRun = trigger.maxRuns !== -1 && trigger.runsDone + 1 >= trigger.maxRuns;
       const claimed = await db.workflowTrigger.updateMany({
         where: {
@@ -177,7 +178,7 @@ export async function POST(req: Request) {
         data: {
           lastRunAt: now,
           runsDone: { increment: 1 },
-          ...(isLastRun ? {} : { nextRunAt: computedNext }),
+          ...(isLastRun ? { enabled: false } : { nextRunAt: computedNext }),
         },
       });
 
