@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { AddAssetForm } from "@/components/add-asset-form";
 import { AssetGroupsPanel } from "@/components/asset-groups-panel";
 import { GroupSelector } from "@/components/group-selector";
+import { DeleteAssetButton } from "@/components/delete-asset-button";
 import { assetTestStatus } from "@/lib/assets/status";
 
 export const metadata: Metadata = {
@@ -251,34 +252,7 @@ export default async function AssetsPage() {
                                 currentGroupId={null}
                                 groups={groups}
                               />
-                              <button
-                                onClick={() => {
-                                  if (
-                                    window.confirm(
-                                      `Delete asset "${a.name}"? This cannot be undone.`
-                                    )
-                                  ) {
-                                    fetch(
-                                      `/api/mss/assets/${encodeURIComponent(
-                                        a.id
-                                      )}`,
-                                      {
-                                        method: "DELETE",
-                                        credentials: "same-origin",
-                                      }
-                                    ).then((res) => {
-                                      if (res.ok) {
-                                        window.location.reload();
-                                      } else {
-                                        alert("Failed to delete asset");
-                                      }
-                                    });
-                                  }
-                                }}
-                                className="mt-2 rounded border border-rose-500/40 bg-rose-900/20 px-2 py-1 text-[10px] font-mono text-rose-400 hover:bg-rose-900/40"
-                              >
-                                Delete
-                              </button>
+                              <DeleteAssetButton assetId={a.id} assetName={a.name} />
                             </td>
                           ) : null}
                         </tr>
@@ -369,34 +343,7 @@ export default async function AssetsPage() {
                                   currentGroupId={g.id}
                                   groups={groups}
                                 />
-                                <button
-                                  onClick={() => {
-                                    if (
-                                      window.confirm(
-                                        `Delete asset "${a.name}"? This cannot be undone.`
-                                      )
-                                    ) {
-                                      fetch(
-                                        `/api/mss/assets/${encodeURIComponent(
-                                          a.id
-                                        )}`,
-                                        {
-                                          method: "DELETE",
-                                          credentials: "same-origin",
-                                        }
-                                      ).then((res) => {
-                                        if (res.ok) {
-                                          window.location.reload();
-                                        } else {
-                                          alert("Failed to delete asset");
-                                        }
-                                      });
-                                    }
-                                  }}
-                                  className="mt-2 rounded border border-rose-500/40 bg-rose-900/20 px-2 py-1 text-[10px] font-mono text-rose-400 hover:bg-rose-900/40"
-                                >
-                                  Delete
-                                </button>
+                                <DeleteAssetButton assetId={a.id} assetName={a.name} />
                               </td>
                             ) : null}
                           </tr>
