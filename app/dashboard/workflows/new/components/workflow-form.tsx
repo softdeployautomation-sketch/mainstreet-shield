@@ -17,7 +17,10 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [agentPrompt, setAgentPrompt] = useState("");
-  const [cron, setCron] = useState("");
+  const [triggerType, setTriggerType] = useState<"daily" | "one_time" | "custom" | "manual">("manual");
+  const [dailyTime, setDailyTime] = useState("08:00");
+  const [oneTimeDateTime, setOneTimeDateTime] = useState("");
+  const [customCron, setCustomCron] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -44,6 +47,18 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
       const steps = stepNames
         .map((n, i) => ({ name: n.trim(), tool: stepTools[i]?.trim() || undefined }))
         .filter((s) => s.name.length > 0);
+      // Compute cron expression from trigger type
+      let computedCron: string | undefined;
+      if (triggerType === "daily" && dailyTime) {
+        const [hh, mm] = dailyTime.split(":");
+        computedCron = `0 ${mm} ${hh} * * *`;
+      } else if (triggerType === "one_time" && oneTimeDateTime) {
+        const dt = new Date(oneTimeDateTime);
+        computedCron = `${dt.getUTCMinutes()} ${dt.getUTCHours()} ${dt.getUTCDate()} ${dt.getUTCMonth() + 1} *`;
+      } else if (triggerType === "custom" && customCron.trim()) {
+        computedCron = customCron.trim();
+      }
+
       const res = await fetch("/api/workflows", {
         method: "POST",
         credentials: "same-origin",
@@ -54,7 +69,10 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
           name: name.trim(),
           description: description.trim() || undefined,
           agent_prompt: agentPrompt.trim() || undefined,
-          cron: cron.trim() || undefined,
+          cron: computedCron,
+          triggerType,
+          dailyTime: triggerType === "daily" ? dailyTime : undefined,
+          oneTimeDateTime: triggerType === "one_time" ? oneTimeDateTime : undefined,
           enabled,
           steps,
         }),
@@ -119,27 +137,103 @@ export function WorkflowForm({ companyId, userId }: { companyId: string; userId:
         </div>
 
         <div className="mb-4">
-          <label className="block text-xs text-fg-muted mb-1">Cron Schedule</label>
-          <div className="flex gap-2">
-            <input
-              name="cron"
-              type="text"
-              value={cron}
-              onChange={(e) => setCron(e.target.value)}
-              className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-emerald-500"
-              placeholder="e.g. 0 8 * * *"
-            />
-            <label className="flex items-center gap-2 cursor-pointer">
+          <label className="block text-xs text-fg-muted mb-1">Trigger Type</label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex items-center gap-2 cursor-pointer p-3 rounded border border-input bg-background hover:bg-muted">
               <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
+                type="radio"
+                name="triggerType"
+                value="daily"
+                checked={triggerType === "daily"}
+                onChange={(e) => setTriggerType(e.target.value as "daily" | "one_time" | "custom" | "manual")}
                 className="rounded border-input bg-background text-emerald-600 focus:ring-emerald-500"
               />
-              Enabled
+              Daily at time
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer p-3 rounded border border-input bg-background hover:bg-muted">
+              <input
+                type="radio"
+                name="triggerType"
+                value="one_time"
+                checked={triggerType === "one_time"}
+                onChange={(e) => setTriggerType(e.target.value as "daily" | "one_time" | "custom" | "manual")}
+                className="rounded border-input bg-background text-emerald-600 focus:ring-emerald-500"
+              />
+              One-time date/time
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer p-3 rounded border border-input bg-background hover:bg-muted">
+              <input
+                type="radio"
+                name="triggerType"
+                value="custom"
+                checked={triggerType === "custom"}
+                onChange={(e) => setTriggerType(e.target.value as "daily" | "one_time" | "custom" | "manual")}
+                className="rounded border-input bg-background text-emerald-600 focus:ring-emerald-500"
+              />
+              Custom cron
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer p-3 rounded border border-input bg-background hover:bg-muted">
+              <input
+                type="radio"
+                name="triggerType"
+                value="manual"
+                checked={triggerType === "manual"}
+                onChange={(e) => setTriggerType(e.target.value as "daily" | "one_time" | "custom" | "manual")}
+                className="rounded border-input bg-background text-emerald-600 focus:ring-emerald-500"
+              />
+              Manual only
             </label>
           </div>
-          <p className="mt-1 text-xs text-fg-muted">Any valid cron expression (e.g. "0 8 * * *" for daily 8am). Leave empty for manual runs only.</p>
+        </div>
+
+        {triggerType === "daily" && (
+          <div className="mb-4">
+            <label className="block text-xs text-fg-muted mb-1">Run every day at</label>
+            <input
+              type="time"
+              value={dailyTime}
+              onChange={(e) => setDailyTime(e.target.value)}
+              className="w-48 rounded border border-input bg-background px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        )}
+
+        {triggerType === "one_time" && (
+          <div className="mb-4">
+            <label className="block text-xs text-fg-muted mb-1">Run once at date &amp; time</label>
+            <input
+              type="datetime-local"
+              value={oneTimeDateTime}
+              onChange={(e) => setOneTimeDateTime(e.target.value)}
+              className="w-full rounded border border-input bg-background px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        )}
+
+        {triggerType === "custom" && (
+          <div className="mb-4">
+            <label className="block text-xs text-fg-muted mb-1">Custom cron expression</label>
+            <input
+              type="text"
+              value={customCron}
+              onChange={(e) => setCustomCron(e.target.value)}
+              className="w-full rounded border border-input bg-background px-3 py-2 text-sm text-fg focus:ring-2 focus:ring-emerald-500"
+              placeholder="e.g. 0 8 * * *"
+            />
+            <p className="mt-1 text-xs text-fg-muted">Any valid cron expression (e.g. "0 8 * * *" for daily 8am).</p>
+          </div>
+        )}
+
+        <div className="mb-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="rounded border-input bg-background text-emerald-600 focus:ring-emerald-500"
+            />
+            Enabled
+          </label>
         </div>
 
         <div className="mb-4">

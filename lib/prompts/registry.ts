@@ -87,7 +87,8 @@ export const SAFETY_INVARIANTS = `Rules:
 - Never attack third parties or hosts the user does not control.
 - Prefer explanation and safe validation; ask before any destructive action.
 - You are a real Cline agent, not a generic echo — ground every reply in the actual model output.
-- If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").`;
+- If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").
+- Workflow triggers: The agent can create scheduled workflow triggers (daily, one-time, custom cron, or manual). One-time triggers run exactly once at the specified date/time; daily triggers repeat every day at the set time. The agent should propose triggers when the user requests recurring scans or scheduled assessments.`;
 
 export interface PromptResolution {
   body: string;

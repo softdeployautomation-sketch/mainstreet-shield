@@ -37,6 +37,11 @@ model User {
   agentFindings     AgentFinding[]
   userSettings      UserSettings?
   clineAuthSession  ClineAuthSession?
+
+  // Notifications
+  notifications     Notification[]    @relation("NotificationUser")
+  notificationPreferences NotificationPreference? @relation("NotificationPreferenceUser")
+  approvalTokens    ApprovalToken[]   @relation("ApprovalTokenUser")
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +259,9 @@ model WorkflowRunStep {
   endedAt     DateTime?
   retryCount  Int      @default(0)
   error       String?
+
+  needsHuman   Boolean @default(false)
+  needsHumanAt DateTime?
 
   run   WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   step  WorkflowStep? @relation("WorkflowRunSteps", fields: [stepId], references: [id], onDelete: SetNull)
@@ -582,4 +590,69 @@ model MemoryReview {
   decidedAt   DateTime?
   rationale   String?
   createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Notification outbox — queued before send
+// ---------------------------------------------------------------------------
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String   // MSS user who receives it
+  type        String   // "workflow_approval" | "scan_complete" | "finding_new" | "system_alert"
+  channel     String   // "email" | "in_app"
+  status      String   @default("pending") // pending | sent | failed | read
+  subject     String?
+  body        String?
+  metadata    Json?    // workflowId, runId, stepId, assetId, etc. as needed
+  sentAt      DateTime?
+  failedAt    DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+  readAt      DateTime?
+
+  user   User @relation("NotificationUser", fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+}
+
+// ---------------------------------------------------------------------------
+// Per-user notification channel opt-out preferences
+// ---------------------------------------------------------------------------
+model NotificationPreference {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  emailEnabled Boolean @default(true)
+  inAppEnabled Boolean @default(true)
+  workflowApprovalEmail Boolean @default(true)
+  scanCompleteEmail Boolean @default(true)
+  findingNewEmail Boolean @default(true)
+  systemAlertEmail Boolean @default(true)
+  updatedAt   DateTime @updatedAt
+
+  user   User @relation("NotificationPreferenceUser", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Approval tokens for needs-human workflow steps — signed + expiring, single-use
+// ---------------------------------------------------------------------------
+model ApprovalToken {
+  id          String   @id @default(cuid())
+  userId    String   // MSS user associated with this token
+  user   User @relation("ApprovalTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique // signed + expiring single-use token
+  workflowId  String
+  runId       String
+  stepId      String?
+  action      String   // "approve" | "reject"
+  decidedById String?
+  decidedAt   DateTime?
+  expiresAt   DateTime // must be in future
+  usedAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([token])
+  @@index([workflowId])
+  @@index([expiresAt])
 }
