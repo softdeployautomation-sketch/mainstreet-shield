@@ -202,7 +202,7 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 | 3 | Confirm lab VM is disposable (Stop erases disk) | gate for shipping power buttons | **CONFIRMED** — `shield-lab` has `ExecStartPre=virsh destroy` / `ExecStopPost=virsh undefine --remove-all-storage`; intentionally disposable, safe to expose power buttons |
 | 4 | Install sudoers (`MSS_APP_USER=…`) if non-root | 1B control | **DONE** — `/etc/sudoers.d/mainstreet-shield-admin` installed on VPS 207.244.224.57, `visudo -cf` parsed OK, root:root mode 0440; grants `mainstreet-shield` NOPASSWD `systemctl start|stop|restart mainstreet-shield-vm.service` only |
 | 5 | **Rotate `MAINSTREET_SERVICE_TOKEN`** and remove literal from `admin-panel.tsx:5935,5961` | P0 browser secret leak | **DONE** — rotated on VPS 207.244.224.57: `/opt/mainstreet-shield/.env`, `/opt/spaceworker/.env` (both `MAINSTREET_SERVICE_TOKEN` + `MSS_SERVICE_TOKEN` + `mainstreetServiceToken`), old token `a6c7306c…` removed from all three locations, both services restarted and active. |
-| 6 | Deploy 1B, then 1C | click-through/UI | **DONE for 1B** — GitHub Actions Build & Deploy run 45155068849 completed; service restarted on VPS |
+| 6 | Deploy all batches | click-through/UI | **DONE** — all batches deployed via GitHub Actions to VPS 207.244.224.57 |
 | 7 | Fix or accept `lint` config; add `tests/` | gates currently unusable | logged |
 
 ---
@@ -219,6 +219,19 @@ Any admin list that merges company rows must show the company/scope. If an `acti
 - Owner’s original bug list: raw markdown/fonts, menus not closing, workflow triggers, asset pending status, asset groups, findings, email notifications, Workflows nav. Map: WP6.8 (chat/menus/nav), 7.3 (triggers), 7.5 (assets/groups), 7.6 (findings), 7.4 (notifications).
 
 ---
+
+
+## 9. Known Bugs — Open for Next SVE
+
+| # | Bug | Location | Severity |
+|---|-----|----------|----------|
+| B-1 | Workflow detail page shows dark/blank "page could not load" — doesn't show trigger type (daily/one-time/custom/manual), run status (success/pending/failed), or run history | `app/dashboard/workflows/[id]/page.tsx` | P1 |
+| B-2 | Workflow list doesn't show trigger type or last run status | `components/workflow-list.tsx` | P2 |
+| B-3 | Overview/assets page shows all assets as "pending" including already tested ones; no status filter | `app/dashboard/page.tsx`, `app/dashboard/assets/page.tsx` | P2 |
+| B-4 | Chat agent claims it can't create an asset group — `mss_create_asset_group` tool may not exist or `CompanyAssetGroup` model missing from schema | `lib/clin/cline-session.ts`, agent tool registry | P1 |
+| B-5 | Scheduler tick: agent may not respond to scheduled workflow messages until user manually chats | `app/internal/scheduler/tick/route.ts`, `lib/clin/cline-session.ts` | P1 |
+| B-6 | Workflow form: Agent Prompt and Cron Schedule fields exist but form doesn't validate ownership or company boundary on submit | `app/dashboard/workflows/new/components/workflow-form.tsx` | P2 |
+| B-7 | `prisma/schema.prisma.bak` backup file may still be committed in repo root | repo root | P2 |
 
 ## 10. Next handoffs (queue)
 
