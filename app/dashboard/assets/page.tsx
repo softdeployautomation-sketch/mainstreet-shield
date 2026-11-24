@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { AddAssetForm } from "@/components/add-asset-form";
 import { AssetGroupsPanel } from "@/components/asset-groups-panel";
 import { GroupSelector } from "@/components/group-selector";
+import { assetTestStatus } from "@/lib/assets/status";
 
 export const metadata: Metadata = {
   title: "Assets — MainStreet Shield",
@@ -24,6 +25,8 @@ interface AssetRow {
   groupId: string | null;
   group: { id: string; name: string } | null;
   createdAt: Date;
+  status: "tested" | "untested";
+  lastTestedAt: Date | null;
 }
 
 interface GroupRow {
@@ -54,7 +57,7 @@ export default async function AssetsPage() {
     include: {
       assets: {
         orderBy: { createdAt: "desc" },
-        include: { group: true },
+        include: { group: true, agentFindings: { select: { createdAt: true }, orderBy: { createdAt: "desc" } } },
       },
       groups: {
         orderBy: { name: "asc" },
@@ -77,6 +80,8 @@ export default async function AssetsPage() {
     groupId: a.groupId,
     group: a.group ? { id: a.group.id, name: a.group.name } : null,
     createdAt: a.createdAt,
+    status: assetTestStatus(a.agentFindings).status,
+    lastTestedAt: assetTestStatus(a.agentFindings).lastTestedAt,
   }));
   const groups: GroupRow[] = (company?.groups ?? []).map((g) => ({
     id: g.id,
@@ -106,6 +111,28 @@ export default async function AssetsPage() {
           ← Back to dashboard
         </Link>
           <h1 className="text-3xl font-display font-bold tracking-tight mt-2">Assets</h1>
+
+        {/* Filter links */}
+        <div className="flex gap-2 mb-6">
+          <Link
+            href="/dashboard/assets"
+            className="text-sm font-mono rounded px-3 py-1.5 transition-colors bg-zinc-100/50 text-zinc-400 dark:bg-zinc-800/50 dark:text-zinc-400 hover:bg-brand-100 dark:hover:bg-brand-200"
+          >
+            All
+          </Link>
+          <Link
+            href="/dashboard/assets?status=tested"
+            className="text-sm font-mono rounded px-3 py-1.5 transition-colors bg-zinc-100/50 text-zinc-400 dark:bg-zinc-800/50 dark:text-zinc-400 hover:bg-brand-100 dark:hover:bg-brand-200"
+          >
+            Tested
+          </Link>
+          <Link
+            href="/dashboard/assets?status=untested"
+            className="text-sm font-mono rounded px-3 py-1.5 transition-colors bg-zinc-100/50 text-zinc-400 dark:bg-zinc-800/50 dark:text-zinc-400 hover:bg-brand-100 dark:hover:bg-brand-200"
+          >
+            Un tested
+          </Link>
+        </div>
         </div>
 
         {/* B-5: prompt to create a company first when none exists */}
@@ -263,6 +290,12 @@ export default async function AssetsPage() {
                           <th className="px-4 py-3 text-xs font-mono text-fg-muted">
                             Created
                           </th>
+<th className="px-4 py-3 text-xs font-mono text-fg-muted">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-xs font-mono text-fg-muted">
+                            Last Tested
+                          </th>
                           {canManage ? (
                             <th className="px-4 py-3 text-xs font-mono text-fg-muted">
                               Actions
@@ -291,6 +324,12 @@ export default async function AssetsPage() {
                             </td>
                             <td className="px-4 py-3 font-mono text-fg-muted">
                               {a.inScope ? "Yes" : "No"}
+                            </td>
+<td className="px-4 py-3 font-mono text-fg-muted">
+                              {a.status === "tested" ? "Tested" : "Untested"}
+                            </td>
+                            <td className="px-4 py-3 font-mono text-fg-muted">
+                              {a.lastTestedAt ? new Date(a.lastTestedAt).toLocaleDateString() : '—'}
                             </td>
                             <td className="px-4 py-3 font-mono text-fg-muted">
                               {new Date(a.createdAt).toLocaleDateString()}

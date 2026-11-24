@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { deleteSession, getSession, requirePasswordUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { assetTestStatus } from "@/lib/assets/status";
 
 export const metadata: Metadata = {
   title: "Dashboard — MainStreet Shield",
@@ -89,6 +90,7 @@ export default async function DashboardPage() {
         include: {
           agentFindings: {
             select: { createdAt: true },
+            orderBy: { createdAt: "desc" },
           },
         },
       },
@@ -199,9 +201,9 @@ export default async function DashboardPage() {
                       <td className="px-4 py-3 font-mono text-sm">{asset.target}</td>
                       <td className="px-4 py-3 text-xs font-mono text-fg-muted">{asset.type}</td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-400">{asset.agentFindings?.[0]?.status === "active" ? "Tested" : "Untested"}</span>
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-400">{assetTestStatus(asset.agentFindings).status === "tested" ? "Tested" : "Untested"}</span>
                       </td>
-                      <td className="px-4 py-3 text-xs font-mono text-fg-muted">{asset.agentFindings?.[0]?.createdAt ? new Date(asset.agentFindings[0].createdAt).toLocaleDateString() : '—'}</td>
+                      <td className="px-4 py-3 text-xs font-mono text-fg-muted">{assetTestStatus(asset.agentFindings).lastTestedAt ? new Date(assetTestStatus(asset.agentFindings).lastTestedAt as Date).toLocaleDateString() : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
