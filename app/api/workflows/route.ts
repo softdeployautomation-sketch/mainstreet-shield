@@ -103,6 +103,7 @@ export async function POST(req: Request) {
 
     // Compute cron from trigger type (server-side validation).
     let computedCron: string | undefined;
+    let oneTimeNextRunAt: Date | undefined;
     let maxRuns = -1; // unlimited by default
     if (triggerType === "daily" && dailyTime) {
       const [hh, mm] = dailyTime.split(":");
@@ -119,6 +120,9 @@ export async function POST(req: Request) {
             { status: 400 }
           );
         }
+        // For one-time triggers, nextRunAt is the exact datetime, not the next annual cron match.
+        // The cron pattern "mm hh DD MM *" recurs every year; we want a single run at dt.
+        oneTimeNextRunAt = dt;
       }
     } else if (triggerType === "custom" && cron?.trim()) {
       if (!parseCron(cron.trim())) {
@@ -162,7 +166,7 @@ export async function POST(req: Request) {
           workflowId: workflow.id,
           cron: computedCron,
           enabled: enabled ?? true,
-          nextRunAt: nextRunAt(computedCron, new Date()),
+          nextRunAt: oneTimeNextRunAt ?? nextRunAt(computedCron, new Date()),
           runsDone: 0,
           maxRuns,
         },
