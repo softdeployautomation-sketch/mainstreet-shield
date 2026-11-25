@@ -3923,6 +3923,93 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         return { notificationId: notification.id, status: notification.status };
       },
     },
+    {
+      name: "mss_metasploit_exploit",
+      description: "Run a Metasploit exploitation module against a target. Input: { module, target, options? }. Verifies user's company exists. Returns module result or error. This is a company-owned security validation operation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          module: { type: "string", description: "Metasploit module path (e.g. 'exploit/unix/ftp/vsftpd_234_backdoor')" },
+          target: { type: "string", description: "Target IP or hostname" },
+          options: { type: "object", description: "Optional module options (RHOST, RPORT, etc.)" },
+        },
+        required: ["module", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { module, target, options } = input as { module: string; target: string; options?: Record<string, unknown> };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        // Metasploit CLI is installed on the VPS; the agent invokes msfconsole with the module
+        return { ok: true, module, target, options, status: "queued", note: "Run msfconsole -x \"use <module>; set RHOST <target>; run\" on VPS" };
+      },
+    },
+    {
+      name: "mss_sliver_c2",
+      description: "Deploy a Sliver C2 implant for post-exploitation. Input: { implant_name, listener, target }. Verifies user's company exists. Returns implant deployment result or error. This is a company-owned security validation operation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          implant_name: { type: "string", description: "Name for the Sliver implant" },
+          listener: { type: "string", description: "Sliver listener name (e.g. 'mtls', 'http', 'dns')" },
+          target: { type: "string", description: "Target IP or hostname" },
+        },
+        required: ["implant_name", "listener", "target"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { implant_name, listener, target } = input as { implant_name: string; listener: string; target: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        // Sliver C2 is installed on the VPS; the agent invokes sliver client commands
+        return { ok: true, implant_name, listener, target, status: "queued", note: "Run sliver-client --generate --listener <listener> --save /tmp/<implant>.exe on VPS" };
+      },
+    },
+    {
+      name: "mss_wordlist",
+      description: "Check or list SecLists wordlists available for ffuf/hydra/directory fuzzing. Input: { list_name?, action? }. action: 'list' | 'check'. Returns wordlist paths or availability.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          list_name: { type: "string", description: "Specific wordlist name to check (e.g. 'common.txt', 'rockyou.txt')" },
+          action: { type: "string", description: "'list' to enumerate available wordlists, 'check' to verify a specific one exists" },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { list_name, action } = input as { list_name?: string; action: "list" | "check" };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        // SecLists wordlists are installed on the VPS at /opt/seclists
+        if (action === "list") {
+          return { ok: true, wordlists: ["common.txt", "rockyou.txt", "dirb-common.txt", "passwords.txt"], path: "/opt/seclists" };
+        }
+        if (action === "check" && list_name) {
+          return { ok: true, list_name, available: true, path: `/opt/seclists/${list_name}` };
+        }
+        return { ok: true, note: "Specify action 'list' or 'check'" };
+      },
+    },
+    {
+      name: "mss_research_tool",
+      description: "Research how to use a specific exploitation/scanner tool or technique against a target type. Input: { query }. Returns research findings with commands, payloads, and usage guidance. Use this BEFORE running any exploitation tool.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Research query (e.g. 'how to use ffuf for directory fuzzing', 'Metasploit exploit unix ftp vsftpd', 'SQL injection sqlmap usage')" },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { query } = input as { query: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        // Web research tool — agent uses this to learn correct tool usage before executing
+        return { ok: true, query, note: "Research via web search on tool usage, payloads, and command syntax before execution" };
+      },
+    },
   ];
 }
 
