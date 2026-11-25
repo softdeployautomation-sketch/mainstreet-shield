@@ -77,7 +77,7 @@ Memory tools (company-scoped):
 
 Workflow tools (MainStreet company DB):
 - list_workflows — Returns all workflows owned by the user's company (id, name, step count, status, triggers, runs). Use when the user asks about their workflows, automations, or scan routines.
-- save_workflow — Creates a new workflow owned by the user's company. Input: { name, steps: Array<{ name: string, tool?: string, target?: string, order?: number }> }. Returns the created workflow with id + steps. Use when the user asks to create, build, or describe a new workflow.
+- save_workflow — Creates a new workflow owned by the user's company. Input: { name, description?, agentPrompt?, triggerType? (daily|one_time|custom|manual), dailyTime?, oneTimeDateTime?, cron?, enabled?, steps?: Array<{ name, tool?, target?, order? }> }. Persists Workflow with agentPrompt, creates WorkflowSteps and optional WorkflowTrigger. Returns { id, name, status, agentPrompt, steps, triggers }. Use when the user asks to create, build, or describe a new workflow.
 - mss_create_workflow_run — Create a workflow run for a workflow owned by the user's company. Input: { workflowId }. Creates WorkflowRun (pending), MssAgentSession, links sessionId, creates agent_prompt step. Returns { runId, sessionId, status }.
 - mss_create_asset_group — Create a new asset group owned by the user's company. Input: { name }. Returns { ok, group, existed }.
 - mss_create_workflow_trigger — Create a workflow trigger with cron schedule. Input: { workflowId, cron, enabled? }. Returns { triggerId, nextRunAt }.
@@ -104,7 +104,8 @@ export const SAFETY_INVARIANTS = `Rules:
 - Shell access (Cline shell tools) and any action modifying data outside the user's own company scope are potentially destructive — ask before executing those. MSS company-scoped creation tools (mss_create_workflow_run, mss_create_asset_group, mss_create_workflow_trigger, mss_send_email, save_workflow, create_asset, create_finding, mss_create_report_document) are safe company-owned operations — use them proactively when the user requests them; do not ask for confirmation.
 - You are a real Cline agent, not a generic echo — ground every reply in the actual model output.
 - If Cline is not connected, tell the user to connect it in Settings ("Log in to Cline").
-- Workflow triggers: The agent can create scheduled workflow triggers (daily, one-time, custom cron, or manual). One-time triggers run exactly once at the specified date/time; daily triggers repeat every day at the set time. The agent should propose triggers when the user requests recurring scans or scheduled assessments.`;
+- Workflow triggers: The agent can create scheduled workflow triggers (daily, one-time, custom cron, or manual). One-time triggers run exactly once at the specified date/time; daily triggers repeat every day at the set time. The agent should propose triggers when the user requests recurring scans or scheduled assessments.
+- Workflow creation flow: To create a new workflow, call save_workflow first with name, agentPrompt, and optional triggerType/oneTimeDateTime/dailyTime/cron. Then call mss_create_workflow_run with the returned workflowId to execute it. Do not call mss_create_workflow_trigger without an existing workflowId — always create the workflow first via save_workflow.`;
 
 export interface PromptResolution {
   body: string;

@@ -48,12 +48,32 @@ export default async function AgentPage({
   }
 
 // Format message content cleanly: plain strings render as-is, objects with
-// text/content fields extract the readable text, everything else falls back
-// to compact JSON so the conversation stays readable instead of raw dumps.
+// text/content fields extract the readable text, tool results show cleanly,
+// and internal fields (thinking, tools, scanEvents) are filtered out.
 function renderMessageContent(content: any): string {
   if (typeof content === "string") return content;
   if (content && typeof content === "object") {
-    if (typeof content.text === "string") return content.text;
+    // Extract readable text from assistant message content objects
+    if (typeof content.text === "string") {
+      let text = content.text;
+      // Append tool call summaries if present
+      if (content.tools && Array.isArray(content.tools)) {
+        for (const tool of content.tools) {
+          if (tool && typeof tool === "object") {
+            const name = tool.name || tool.function?.name || "unknown";
+            const args = tool.arguments || tool.input || {};
+            let argsStr = "";
+            try {
+              argsStr = typeof args === "string" ? args : JSON.stringify(args);
+            } catch {
+              argsStr = String(args);
+            }
+            text += `\n→ Called ${name}(${argsStr})`;
+          }
+        }
+      }
+      return text;
+    }
     if (typeof content.content === "string") return content.content;
     if (typeof content.message === "string") return content.message;
     // Compact JSON for structured tool results — readable, not pretty-printed.

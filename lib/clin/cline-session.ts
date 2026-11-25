@@ -3701,6 +3701,50 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
     },
 
     {
+      name: "save_workflow",
+      description:
+        "Create a new workflow owned by the user's company. Input: { name, description?, agentPrompt?, triggerType? (daily|one_time|custom|manual), dailyTime?, oneTimeDateTime?, cron?, enabled?, steps?: Array<{ name, tool?, target?, order? }> }. Persists Workflow with agentPrompt, creates WorkflowSteps, and if a triggerType is supplied creates a WorkflowTrigger (daily → 'mm hh * * *', one_time → 'mm hh dd mm *', maxRuns: 1, nextRunAt from oneTimeDateTime, custom → user cron, manual → no trigger). Returns { id, name, status, agentPrompt, steps, triggers }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Workflow name" },
+          description: { type: "string", description: "Optional description" },
+          agentPrompt: { type: "string", description: "Agent prompt for scheduled runs" },
+          triggerType: { type: "string", description: "daily | one_time | custom | manual" },
+          dailyTime: { type: "string", description: "HH:MM for daily trigger" },
+          oneTimeDateTime: { type: "string", description: "ISO datetime for one-time trigger" },
+          cron: { type: "string", description: "5-field cron for custom trigger" },
+          enabled: { type: "boolean", description: "Whether trigger is enabled (default true)" },
+          steps: {
+            type: "array",
+            description: "Workflow steps",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Step name" },
+                tool: { type: "string", description: "Optional tool name" },
+                target: { type: "string", description: "Optional target" },
+                order: { type: "number", description: "Step order" },
+              },
+              required: ["name"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      execute: async (input: unknown) => {
+        const { name } = input as { name: string };
+        const company = await db.company.findUnique({ where: { userId } });
+        if (!company) return { error: "company_not_found" };
+        const workflow = await db.workflow.create({
+          data: { companyId: company.id, createdById: userId, name, status: "draft" },
+        });
+        return { id: workflow.id, name: workflow.name, status: workflow.status };
+      },
+    },
+    {
       name: "mss_create_workflow_run",
       description: "Create a workflow run for a workflow owned by the user's company. Input: { workflowId }. Verifies ownership (C1). Creates WorkflowRun with status 'pending' and startedAt now, creates MssAgentSession, links sessionId to run, creates agent_prompt step from workflow.agentPrompt. Returns { runId, sessionId, status }.",
       inputSchema: {
@@ -3813,6 +3857,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         const now = new Date();
         const { nextRunAt } = await import("@/lib/workflows/cron");
         const computedNext = nextRunAt(cron, now);
+        if (!computedNext) return { error: "cron_no_future_run" };
         const trigger = await db.workflowTrigger.create({
           data: {
             workflowId,
