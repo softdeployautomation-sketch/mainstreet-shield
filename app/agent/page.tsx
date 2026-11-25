@@ -47,6 +47,21 @@ export default async function AgentPage({
     }
   }
 
+// Format message content cleanly: plain strings render as-is, objects with
+// text/content fields extract the readable text, everything else falls back
+// to compact JSON so the conversation stays readable instead of raw dumps.
+function renderMessageContent(content: any): string {
+  if (typeof content === "string") return content;
+  if (content && typeof content === "object") {
+    if (typeof content.text === "string") return content.text;
+    if (typeof content.content === "string") return content.content;
+    if (typeof content.message === "string") return content.message;
+    // Compact JSON for structured tool results — readable, not pretty-printed.
+    return JSON.stringify(content);
+  }
+  return String(content);
+}
+
   return (
     <div className="flex flex-col h-full gap-4 p-4 bg-bg text-fg">
       <div className="flex items-center justify-between mb-4">
@@ -92,7 +107,7 @@ export default async function AgentPage({
                         {m.role === "user" ? "You" : "Agent"}
                       </div>
                       <div className={`text-sm whitespace-pre-wrap ${m.role === "user" ? "text-fg" : "text-emerald-400"}`}>
-                        {typeof m.content === "string" ? m.content : JSON.stringify(m.content, null, 2)}
+                        {renderMessageContent(m.content)}
                       </div>
                     </div>
                   ))}
