@@ -76,7 +76,16 @@ function renderMessageContent(content: any): string {
     }
     if (typeof content.content === "string") return content.content;
     if (typeof content.message === "string") return content.message;
-    // Compact JSON for structured tool results — readable, not pretty-printed.
+    // Extract readable fields from tool result objects (not pretty-printed JSON)
+    const readable: string[] = [];
+    if (content.ok !== undefined) readable.push(`ok: ${content.ok}`);
+    if (content.error) readable.push(`error: ${content.error}`);
+    if (content.status) readable.push(`status: ${content.status}`);
+    if (content.note) readable.push(`note: ${content.note}`);
+    if (content.output) readable.push(`output: ${typeof content.output === "string" ? content.output : JSON.stringify(content.output)}`);
+    if (content.message) readable.push(`message: ${content.message}`);
+    if (readable.length > 0) return readable.join(" | ");
+    // Compact JSON as last resort — no indentation, single line
     return JSON.stringify(content);
   }
   return String(content);
@@ -140,8 +149,8 @@ function renderMessageContent(content: any): string {
                   <div key={step.id} className="flex flex-col gap-2 pt-2 border-t border-border/30">
                     <div className="text-[10px] font-mono text-fg-muted uppercase mb-1">{step.name}</div>
                     <div className="text-xs text-fg-muted font-mono mb-1">{step.type} · {step.status}{step.startedAt ? ` · started ${new Date(step.startedAt).toLocaleString()}` : ""}{step.endedAt ? ` · ended ${new Date(step.endedAt).toLocaleString()}` : ""}</div>
-                    {step.input && <div className="text-sm text-fg whitespace-pre-wrap">{typeof step.input === "string" ? step.input : JSON.stringify(step.input, null, 2)}</div>}
-                    {step.output && <div className="text-sm text-emerald-400 whitespace-pre-wrap mt-1">{typeof step.output === "string" ? step.output : JSON.stringify(step.output, null, 2)}</div>}
+                    {step.input && <div className="text-sm text-fg whitespace-pre-wrap">{typeof step.input === "string" ? step.input : JSON.stringify(step.input)}</div>}
+                    {step.output && <div className="text-sm text-emerald-400 whitespace-pre-wrap mt-1">{typeof step.output === "string" ? step.output : JSON.stringify(step.output)}</div>}
                     {step.error && <div className="text-sm text-rose-400 whitespace-pre-wrap mt-1">Error: {step.error}</div>}
                   </div>
                 ))
