@@ -3844,7 +3844,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
 
     {
       name: "mss_create_workflow_trigger",
-      description: "Create a workflow trigger with cron schedule. Input: { workflowId, cron, enabled? }. Validates cron (5-field expression), sets nextRunAt, max 5 active per company. Returns { triggerId, nextRunAt }.",
+      description: "Create a workflow trigger with cron schedule. Input: { workflowId, cron, enabled? }. Validates cron (5-field expression), sets nextRunAt, max 50 active per company. Returns { triggerId, nextRunAt }.",
       inputSchema: {
         type: "object",
         properties: {
@@ -3870,7 +3870,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
           const activeCount = await db.workflowTrigger.count({
             where: { workflow: { companyId: company.id }, enabled: true },
           });
-          if (activeCount >= 5) return { error: "trigger_cap_reached" };
+          if (activeCount >= 50) return { error: "trigger_cap_reached" };
         }
 
         const now = new Date();

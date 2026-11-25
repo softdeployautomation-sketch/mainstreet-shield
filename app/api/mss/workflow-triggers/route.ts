@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { parseCron } from "@/lib/workflows/cron";
 
-const MAX_ACTIVE_TRIGGERS_PER_COMPANY = 5;
+const MAX_ACTIVE_TRIGGERS_PER_COMPANY = 50;
 const MIN_INTERVAL_MINUTES = 10;
 
 export async function POST(req: Request) {
