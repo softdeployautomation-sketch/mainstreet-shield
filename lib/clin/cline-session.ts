@@ -3005,7 +3005,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
                   }
                 : undefined,
             ...(computedCron && {
-              triggers: {
+              workflowTriggers: {
                 create: {
                   cron: computedCron,
                   enabled: enabled ?? true,
@@ -3563,13 +3563,13 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             description: rationale ?? null,
             body,
             version: nextVersion,
-            status: computedCron ? "active" : "draft",
+            status: "draft",
             source: "agent",
             rationale,
             createdById: userId,
           },
         });
-        return { id: draft.id, status: computedCron ? "active" : "draft", requires: "admin activation" };
+        return { id: draft.id, status: "draft", requires: "admin activation" };
       },
     },
 
