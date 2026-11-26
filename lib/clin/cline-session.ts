@@ -2991,7 +2991,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             name,
             description: description ?? null,
             agentPrompt: agentPrompt ?? null,
-            status: "draft",
+            status: computedCron ? "active" : "draft",
             steps:
               steps?.length
                 ? {
@@ -3563,13 +3563,13 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
             description: rationale ?? null,
             body,
             version: nextVersion,
-            status: "draft",
+            status: computedCron ? "active" : "draft",
             source: "agent",
             rationale,
             createdById: userId,
           },
         });
-        return { id: draft.id, status: "draft", requires: "admin activation" };
+        return { id: draft.id, status: computedCron ? "active" : "draft", requires: "admin activation" };
       },
     },
 
