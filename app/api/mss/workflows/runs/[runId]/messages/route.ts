@@ -1,6 +1,10 @@
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import {
+  sendClineMessage,
+  startClineSession,
+} from "@/lib/clin/cline-session";
 
 export async function GET(req: Request) {
   try {
@@ -119,9 +123,56 @@ export async function POST(req: Request) {
       },
     });
 
+    // Process the message through ClineCore (same pattern as /api/mss/agent/chat).
+    // Cold-resumes via startClineSession when ClineCore lost the session.
+    let clineResult;
+    try {
+      clineResult = await sendClineMessage({
+        sessionId: targetSessionId,
+        userId: session.userId,
+        prompt: typeof message === "string" ? message : JSON.stringify(message),
+      });
+      if (
+        clineResult.status === "failed" &&
+        typeof clineResult.error === "string" &&
+        /session_not_found|session not found|unusable session/i.test(clineResult.error)
+      ) {
+        clineResult = await startClineSession({
+          userId: session.userId,
+          sessionId: targetSessionId,
+          prompt: typeof message === "string" ? message : JSON.stringify(message),
+          resume: true,
+        });
+      }
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error: err instanceof Error ? err.message : "workflow chat failed",
+          runId,
+          sessionId: targetSessionId,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (clineResult.status === "failed") {
+      return NextResponse.json(
+        {
+          error: clineResult.error ?? "workflow chat failed",
+          runId,
+          sessionId: targetSessionId,
+          clineReady: clineResult.clineReady ?? false,
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       runId,
-      status: "message stored",
+      sessionId: targetSessionId,
+      response: clineResult.response,
+      thinking: clineResult.thinking,
+      status: "message processed",
     }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: "internal error" }, { status: 500 });
