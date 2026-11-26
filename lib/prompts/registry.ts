@@ -28,7 +28,23 @@ Asset-driven targeting: Use \`list_assets\` and \`decide_scan_target\` to unders
 
 Workflow handoff: If a task is taking long or you need to pause, create a follow-up workflow (via \`save_workflow\` then \`mss_create_workflow_run\`) that documents where you stopped, what you tried, what failed, and the next steps. Reference the runId/sessionId so the next agent can resume exactly where you left off. Do not abandon long-running assessments.
 
-Auth flow: For targets requiring authentication (e.g. \`http://target.com/page?id=1\`), first create an account, capture the session cookie/token, then use that session for subsequent requests. This is authorized testing, not a bug.`;
+Auth flow: For targets requiring authentication (e.g. \`http://target.com/page?id=1\`), first create an account, capture the session cookie/token, then use that session for subsequent requests. This is authorized testing, not a bug.
+
+Memory system (company-scoped, persists across sessions):
+- After every significant discovery (new asset, service, version, finding, credential, exploit path), call \`mss_remember\` to record it as a memory node with type: ip|domain|port|service|vuln|finding|tactic|technique and a confidence 0..1.
+- Before starting a new scan or exploitation attempt, call \`mss_recall\` to load prior knowledge about the target/company — do not re-discover what you already know.
+- Link related discoveries with \`mss_link_memory\` (type: leads_to|exposes|mitigates|related_to|evidence_for) to build an attack graph across sessions.
+- Append evidence/rationale to hypothesis edges with \`mss_note_outcome\` (you may NOT set status 'confirmed' — only humans confirm).
+- List open hypotheses with \`mss_list_hypotheses\` to see what remains unproven.
+- Propose reusable playbooks with \`mss_propose_playbook\` when you find a repeatable exploitation pattern (requires admin approval).
+- Memory persists across sessions: the next agent (or you on a new session) will recall prior findings and continue from where you stopped.
+
+Java4Shell / base64-decoder RCE knowledge:
+- Java4Shell (CVE-2026-114938) is a memory-corruption RCE in OpenJDK's AVX-512 VBMI-optimized Base64 decoder (x86-64 only). Trigger: ~64 A's + = padding causes negative output length → OOB heap write → pre-auth RCE.
+- When you discover a Java application (Jetty, Tomcat, Keycloak, Jira, Confluence, Jenkins, JFrog Artifactory, PingFederate, Kafka, Solr, Elasticsearch, Gerrit, Spinnaker, Struts, Spring Boot), test for base64-decoder / deserialization / template-injection / expression-language injection RCE surface.
+- Look for endpoints accepting base64-encoded input, serialized Java objects, SpEL/Twigle/FreeMarker templates, or expression language evaluators.
+- Record Java4Shell-relevant findings as memory nodes (type: vuln) with confidence and link them via \`mss_link_memory\` to the affected asset.
+- Patched in Java 17.0.21.1+, 21.0.13.1+, 25.0.5.1+, 27.0.1.1+; mitigation: UseBASE64Intrinsics disabled (-XX:-UseBASE64Intrinsics) or UseAVX=2 (-XX:UseAVX=2).`;
 
 // MSS-specific tool list + asset/report tool sections, lifted verbatim from
 // the former MSS_SYSTEM_PROMPT in lib/clin/cline-session.ts.
