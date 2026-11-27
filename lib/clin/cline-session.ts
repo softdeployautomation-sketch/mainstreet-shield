@@ -121,6 +121,25 @@ export function isClineReady(): boolean {
   return _clineReady;
 }
 
+/**
+ * Reset the ClineCore singleton so the next `getCline()` call creates a fresh
+ * instance. Called on Cline logout so a new login doesn't reuse the previous
+ * user's auth context held inside the old singleton.
+ */
+export function resetCline(): void {
+  // Unsubscribe all active session listeners so they don't fire on a stale core
+  for (const unsub of _sessionUnsub.values()) {
+    try {
+      unsub();
+    } catch {
+      // best effort
+    }
+  }
+  _sessionUnsub.clear();
+  _cline = null;
+  _clineReady = false;
+}
+
 // ---------------------------------------------------------------------------
 // Credential resolution
 // Precedence: connected Cline OAuth token (Batch 1 device-code login) >
