@@ -4154,16 +4154,26 @@ export async function startClineSession(
   input: StartClineSessionInput,
   onEvent?: OnClineEvent,
 ): Promise<StartClineSessionResult> {
-  const creds = await resolveClineCredentials(input.userId);
+  let creds = await resolveClineCredentials(input.userId);
   if (!creds) {
-    return {
-      sessionId: "",
-      response: "",
-      thinking: [],
-      status: "failed",
-      error: "cline_disconnected",
-      clineReady: false,
-    };
+    // Force-refresh the OAuth token — it may have expired since the last turn
+    // (e.g. after a page reload during a long scan). Don't give up immediately.
+    const refreshed = await getValidClineOAuthToken(input.userId, {
+      forceRefresh: true,
+    });
+    if (refreshed) {
+      creds = await resolveClineCredentials(input.userId);
+    }
+    if (!creds) {
+      return {
+        sessionId: "",
+        response: "",
+        thinking: [],
+        status: "failed",
+        error: "cline_disconnected",
+        clineReady: false,
+      };
+    }
   }
 
   const core = await getCline();
@@ -4375,15 +4385,25 @@ export async function sendClineMessage(
   input: SendClineMessageInput,
   onEvent?: OnClineEvent,
 ): Promise<SendClineMessageResult> {
-  const creds = await resolveClineCredentials(input.userId);
+  let creds = await resolveClineCredentials(input.userId);
   if (!creds) {
-    return {
-      sessionId: input.sessionId,
-      response: "",
-      thinking: [],
-      status: "failed",
-      error: "cline_disconnected",
-    };
+    // Force-refresh the OAuth token — it may have expired since the last turn
+    // (e.g. after a page reload during a long scan). Don't give up immediately.
+    const refreshed = await getValidClineOAuthToken(input.userId, {
+      forceRefresh: true,
+    });
+    if (refreshed) {
+      creds = await resolveClineCredentials(input.userId);
+    }
+    if (!creds) {
+      return {
+        sessionId: input.sessionId,
+        response: "",
+        thinking: [],
+        status: "failed",
+        error: "cline_disconnected",
+      };
+    }
   }
 
   // Accumulate SSE events during turn for persistence fallback
@@ -4495,7 +4515,10 @@ export async function sendClineMessage(
     // resident). Rebuild with DB transcript as initialMessages, then run this
     // turn. Chat route must NOT call start again (that was amnesia + R2
     // double-persist risk); we return the completed result here.
-    if (isSessionMissingError(err)) {
+    if (
+      isSessionMissingError(err) ||
+      /cline_disconnected|disconnect|session/i.test(String(err))
+    ) {
       try {
         const resumed = await startClineSession(
           {

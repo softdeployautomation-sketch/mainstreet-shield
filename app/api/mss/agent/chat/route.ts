@@ -63,7 +63,9 @@ export async function POST(req: Request) {
         if (
           result.status === "failed" &&
           typeof result.error === "string" &&
-          /session_not_found|session not found|unusable session/i.test(result.error)
+          /session_not_found|session not found|unusable session|cline_disconnected/i.test(
+            result.error
+          )
         ) {
           result = await startClineSession({
             userId: session.userId,
