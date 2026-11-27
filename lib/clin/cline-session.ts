@@ -4407,26 +4407,9 @@ export async function sendClineMessage(
   input: SendClineMessageInput,
   onEvent?: OnClineEvent,
 ): Promise<SendClineMessageResult> {
-  let creds = await resolveClineCredentials(input.userId);
-  if (!creds) {
-    // Force-refresh the OAuth token — it may have expired since the last turn
-    // (e.g. after a page reload during a long scan). Don't give up immediately.
-    const refreshed = await getValidClineOAuthToken(input.userId, {
-      forceRefresh: true,
-    });
-    if (refreshed) {
-      creds = await resolveClineCredentials(input.userId);
-    }
-    if (!creds) {
-      return {
-        sessionId: input.sessionId,
-        response: "",
-        thinking: [],
-        status: "failed",
-        error: "cline_disconnected",
-      };
-    }
-  }
+  // Credentials are NOT required for core.send() — only core.start() (cold
+  // resume fallback) needs them. Try sending to the existing ClineCore session
+  // first; if the session was lost, startClineSession() will handle creds.
 
   // Accumulate SSE events during turn for persistence fallback
   let sseResponse = "";
