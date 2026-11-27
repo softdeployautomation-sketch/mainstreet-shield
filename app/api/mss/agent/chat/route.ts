@@ -192,6 +192,23 @@ export async function POST(req: Request) {
               },
               (event) => enqueue(event.type, event.data),
             );
+          } else if (
+            result.status === "failed" &&
+            typeof result.error === "string" &&
+            result.error === "cline_disconnected"
+          ) {
+            result = await startClineSession(
+              {
+                userId: session.userId,
+                prompt: message,
+                sessionId,
+                modelId,
+                userImages,
+                userFiles,
+                resume: true,
+              },
+              (event) => enqueue(event.type, event.data),
+            );
           }
         } else {
           result = await startClineSession(

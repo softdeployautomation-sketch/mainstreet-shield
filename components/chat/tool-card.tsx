@@ -9,10 +9,11 @@ interface ToolCardProps {
   input?: unknown;
   output?: unknown;
   isError?: boolean;
+  defaultOpen?: boolean;
 }
 
-export function ToolCard({ toolName, input, output, isError }: ToolCardProps) {
-  const [open, setOpen] = React.useState(false);
+export function ToolCard({ toolName, input, output, isError, defaultOpen = false }: ToolCardProps) {
+  const [open, setOpen] = React.useState(defaultOpen);
 
   const jsonSummary = (data: unknown): string => {
     try {

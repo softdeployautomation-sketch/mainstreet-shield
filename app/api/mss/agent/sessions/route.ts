@@ -14,7 +14,7 @@ export async function GET() {
 
   const rows = await db.mssAgentSession.findMany({
     where: { userId: session.userId },
-    orderBy: { startedAt: "desc" },
+    orderBy: { updatedAt: "desc" },
     take: 50,
     select: {
       id: true,

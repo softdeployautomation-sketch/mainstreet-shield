@@ -854,7 +854,7 @@ export function AgentChat() {
             className={`flex flex-col gap-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             {msg.role === "assistant" && msg.thinking && msg.thinking.length > 0 && (
-              <ToolCard toolName="thinking" input={msg.thinking[0]} output={msg.thinking.join("\n")} />
+              <ToolCard toolName="thinking" input={msg.thinking} output={msg.thinking.join("\n")} defaultOpen />
             )}
             {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
               <>

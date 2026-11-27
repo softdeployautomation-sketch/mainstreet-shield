@@ -4547,51 +4547,40 @@ export async function sendClineMessage(
       };
     }
     // Phase 0 R1: cold resume — ClineCore lost the session (restart / not
-    // resident). Rebuild with DB transcript as initialMessages, then run this
-    // turn. Chat route must NOT call start again (that was amnesia + R2
-    // double-persist risk); we return the completed result here.
-    if (
-      isSessionMissingError(err) ||
-      /cline_disconnected|disconnect|session/i.test(String(err))
-    ) {
-      try {
-        const resumed = await startClineSession(
-          {
-            userId: input.userId,
-            sessionId: input.sessionId,
-            prompt: input.prompt,
-            userImages: input.userImages,
-            userFiles: input.userFiles,
-            resume: true,
-          },
-          onEvent,
-        );
-        return {
-          sessionId: resumed.sessionId || input.sessionId,
-          response: resumed.response,
-          thinking: resumed.thinking,
-          status: resumed.status,
-          error: resumed.error,
-          clineReady: resumed.clineReady,
-        };
-      } catch (resumeErr) {
-        return {
+    // resident), or any non-auth send failure. Rebuild with DB transcript as
+    // initialMessages, then run this turn. Chat route must NOT call start
+    // again (that was amnesia + R2 double-persist risk); we return the
+    // completed result here.
+    try {
+      const resumed = await startClineSession(
+        {
+          userId: input.userId,
           sessionId: input.sessionId,
-          response: "",
-          thinking: [],
-          status: "failed",
-          error: resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
-          clineReady: true,
-        };
-      }
+          prompt: input.prompt,
+          userImages: input.userImages,
+          userFiles: input.userFiles,
+          resume: true,
+        },
+        onEvent,
+      );
+      return {
+        sessionId: resumed.sessionId || input.sessionId,
+        response: resumed.response,
+        thinking: resumed.thinking,
+        status: resumed.status,
+        error: resumed.error,
+        clineReady: resumed.clineReady,
+      };
+    } catch (resumeErr) {
+      return {
+        sessionId: input.sessionId,
+        response: "",
+        thinking: [],
+        status: "failed",
+        error: resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
+        clineReady: true,
+      };
     }
-    return {
-      sessionId: input.sessionId,
-      response: "",
-      thinking: [],
-      status: "failed",
-      error: err instanceof Error ? err.message : String(err),
-    };
   } finally {
     setTurnHandler(input.sessionId, null);
   }
