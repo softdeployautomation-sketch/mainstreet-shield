@@ -485,7 +485,16 @@ export function AgentChat() {
           } else if (eventType === "iteration_start") {
             // T2: ignore — no UI output needed
           } else if (eventType === "tool-call") {
-            accumulatedTools.push({ toolName: p.toolName ?? "tool", input: p.input });
+            // FIX-E: push a placeholder tool-call entry; the matching
+            // tool-result will merge its output into this same entry so each
+            // tool execution renders as a single ToolCard (input + output),
+            // not two disconnected cards.
+            accumulatedTools.push({
+              toolName: p.toolName ?? "tool",
+              input: p.input,
+              output: undefined,
+              isError: undefined,
+            });
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
@@ -493,11 +502,23 @@ export function AgentChat() {
             );
             scrollBottom();
           } else if (eventType === "tool-result") {
-            accumulatedTools.push({
-              toolName: p.toolName ?? "tool",
-              output: p.output,
-              isError: p.isError,
-            });
+            // FIX-E: merge output into the last matching tool-call entry
+            // (same toolName, no output yet) so input+output stay paired.
+            const merged = [...accumulatedTools];
+            for (let i = merged.length - 1; i >= 0; i--) {
+              if (
+                merged[i].toolName === p.toolName &&
+                merged[i].output === undefined
+              ) {
+                merged[i] = {
+                  ...merged[i],
+                  output: p.output,
+                  isError: p.isError,
+                };
+                break;
+              }
+            }
+            accumulatedTools = merged;
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
@@ -533,7 +554,9 @@ export function AgentChat() {
                   ? {
                       ...m,
                       content: p.response ?? accumulatedContent,
-                      thinking: [], // clear accumulated thinking — model is done
+                      // FIX-E: keep accumulated thinking visible after the
+                      // stream completes instead of wiping it (was: thinking: []).
+                      thinking: accumulatedThinking,
                       tools: accumulatedTools,
                       scanEvents: p.scanEvents ?? accumulatedScanEvents,
                     }
