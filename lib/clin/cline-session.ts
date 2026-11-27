@@ -4137,35 +4137,27 @@ export function mssTools(userId: string, sessionId: string): AgentTool[] {
 export async function persistClineTurn(input: {
   sessionId: string;
   userId: string;
-  userPrompt: string;
+  // userPrompt is no longer persisted here — the user row is written before
+  // core.send() so it survives a page reload mid-turn. This function now only
+  // persists the assistant response row.
   assistantResponse: string;
   thinking: string[];
   tools: ToolCall[];
   scanEvents?: ScanEvent[];
 }): Promise<void> {
-  await db.$transaction([
-    db.clineAgentMessage.create({
-      data: {
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: "user",
-        content: { text: input.userPrompt },
-      },
-    }),
-    db.clineAgentMessage.create({
-      data: {
-        sessionId: input.sessionId,
-        userId: input.userId,
-        role: "assistant",
-        content: {
-          text: input.assistantResponse,
-          thinking: input.thinking,
-          tools: input.tools,
-          scanEvents: input.scanEvents ?? [],
-        } as any,
-      },
-    }),
-  ]);
+  await db.clineAgentMessage.create({
+    data: {
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: "assistant",
+      content: {
+        text: input.assistantResponse,
+        thinking: input.thinking,
+        tools: input.tools,
+        scanEvents: input.scanEvents ?? [],
+      } as any,
+    },
+  });
 }
 
 
@@ -4247,6 +4239,18 @@ export async function startClineSession(
     }
   });
   _sessionUnsub.set(sessionId, unsubscribe);
+
+  // FIX-C: persist the user's message immediately so it survives a page reload
+  // during a long-running core.start(). The assistant row is persisted after
+  // the turn completes (see persistClineTurn call below).
+  await db.clineAgentMessage.create({
+    data: {
+      sessionId,
+      userId: input.userId,
+      role: "user",
+      content: { text: input.prompt },
+    },
+  });
 
   let resultText = "";
   setTurnHandler(sessionId, turnHandler);
@@ -4362,12 +4366,11 @@ export async function startClineSession(
   // Use SSE-accumulated thinking if ClineCore returned none
   const finalThinking = thinking.length > 0 ? thinking : sseThinking;
 
-  // B-3: persist only THIS turn (new user prompt + assistant). Prior history
-  // already lives in DB on resume — R2: never rewrite it.
+  // B-3: persist only THIS turn (assistant response). User prompt already
+  // persisted before core.start() — see FIX-C above.
   await persistClineTurn({
     sessionId,
     userId: input.userId,
-    userPrompt: input.prompt,
     assistantResponse,
     thinking: finalThinking,
     tools: sseTools,
@@ -4460,6 +4463,19 @@ export async function sendClineMessage(
   });
   _sessionUnsub.set(input.sessionId, unsubscribe);
   setTurnHandler(input.sessionId, turnHandler);
+
+  // FIX-C: persist the user's message immediately so it survives a page reload
+  // during a long-running core.send(). The assistant row is persisted after the
+  // turn completes (see persistClineTurn call below).
+  await db.clineAgentMessage.create({
+    data: {
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: "user",
+      content: { text: input.prompt },
+    },
+  });
+
   try {
     await core.send({
       sessionId: input.sessionId,
@@ -4587,11 +4603,11 @@ export async function sendClineMessage(
   // Use SSE-accumulated thinking if ClineCore returned none
   const finalThinking = thinking.length > 0 ? thinking : sseThinking;
 
-  // B-3: persist only this turn. Don't swallow errors — if DB write fails, surface it.
+  // B-3: persist only this turn (assistant response). User prompt already
+  // persisted before core.send() — see FIX-C above. Don't swallow errors.
   await persistClineTurn({
     sessionId: input.sessionId,
     userId: input.userId,
-    userPrompt: input.prompt,
     assistantResponse,
     thinking: finalThinking,
     tools: sseTools,
