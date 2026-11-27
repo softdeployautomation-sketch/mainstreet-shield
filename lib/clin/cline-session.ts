@@ -4145,17 +4145,48 @@ export async function persistClineTurn(input: {
   tools: ToolCall[];
   scanEvents?: ScanEvent[];
 }): Promise<void> {
+  // Build ordered blocks: text first (if any), then thinking, then
+  // tool-call/tool-result pairs, then scan events — matching arrival order.
+  const blocks: unknown[] = [];
+  if (input.assistantResponse && input.assistantResponse.trim()) {
+    blocks.push({ type: "text", text: input.assistantResponse });
+  }
+  for (const t of input.thinking) {
+    if (t && t.trim()) blocks.push({ type: "thinking", thinking: t });
+  }
+  for (const tool of input.tools) {
+    blocks.push({
+      type: "tool-call",
+      toolName: tool.toolName,
+      input: tool.input,
+    });
+    if (tool.output !== undefined) {
+      blocks.push({
+        type: "tool-result",
+        toolName: tool.toolName,
+        output: tool.output,
+        ...(tool.isError ? { isError: true } : {}),
+      });
+    }
+  }
+  for (const se of input.scanEvents ?? []) {
+    blocks.push({
+      type: "scan-event",
+      eventType: se.type,
+      message: se.message,
+      ...(se.taskId !== undefined ? { taskId: se.taskId } : {}),
+      ...(se.progress !== undefined ? { progress: se.progress } : {}),
+      ...(se.currentStep !== undefined ? { currentStep: se.currentStep } : {}),
+      ...(se.findings !== undefined ? { findings: se.findings } : {}),
+    });
+  }
+
   await db.clineAgentMessage.create({
     data: {
       sessionId: input.sessionId,
       userId: input.userId,
       role: "assistant",
-      content: {
-        text: input.assistantResponse,
-        thinking: input.thinking,
-        tools: input.tools,
-        scanEvents: input.scanEvents ?? [],
-      } as any,
+      content: { blocks } as any,
     },
   });
 }
@@ -4591,14 +4622,31 @@ export interface ToolCall {
   isError?: boolean;
 }
 
+/** A single rendered unit in a message: text, thinking, tool-call, tool-result, or scan-event.
+ *  Blocks preserve arrival order so content and tools interleave naturally. */
+export interface MessageBlock {
+  type: "text" | "thinking" | "tool-call" | "tool-result" | "scan-event";
+  // text / thinking
+  text?: string;
+  thinking?: string;
+  // tool-call / tool-result
+  toolName?: string;
+  input?: unknown;
+  output?: unknown;
+  isError?: boolean;
+  // scan-event
+  eventType?: string;
+  message?: string;
+  taskId?: string;
+  progress?: number | string;
+  currentStep?: string;
+  findings?: unknown[];
+}
+
 export interface ClineUiMessage {
   id: string;
   role: "user" | "assistant";
-  content: string;
-  thinking: string[];
-  tools: ToolCall[];
-  /** Phase 0 R4: persisted scan chips for this assistant turn. */
-  scanEvents?: ScanEvent[];
+  blocks: MessageBlock[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -4631,10 +4679,7 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
       : null;
   if (!role) return null;
 
-  const texts: string[] = [];
-  const thinking: string[] = [];
-  const tools: ToolCall[] = [];
-  let scanEvents: ScanEvent[] | undefined;
+  const blocks: MessageBlock[] = [];
   const parts: unknown[] =
     typeof inner.content === "string"
       ? [{ type: "text", text: inner.content }]
@@ -4642,78 +4687,87 @@ function normalizeClineMessageForUi(m: MessageWithMetadata): ClineUiMessage | nu
         ? inner.content
         : [];
 
-  // Phase 0 R4: scanEvents live on the persisted content object (DB rows) or
-  // as a sibling field depending on how the message was stored.
-  const contentRecord = asRecord(inner.content);
-  const scanFromContent = Array.isArray(contentRecord?.scanEvents)
-    ? (contentRecord.scanEvents as ScanEvent[])
-    : Array.isArray(inner.scanEvents)
-      ? (inner.scanEvents as ScanEvent[])
-      : null;
-  if (scanFromContent && scanFromContent.length > 0) scanEvents = scanFromContent;
+  // Phase 0 R4: scanEvents may live as a sibling field on DB-persisted rows.
+  const siblingScanEvents = Array.isArray(inner.scanEvents)
+    ? (inner.scanEvents as ScanEvent[])
+    : null;
 
   for (const rawPart of parts) {
     const part = asRecord(rawPart);
     if (!part) continue;
     const type = String(part.type ?? "");
+
     if (type === "text") {
-      if (typeof part.text === "string" && part.text.trim())
-        texts.push(role === "user" ? stripUserInput(part.text) : part.text);
+      if (typeof part.text === "string" && part.text.trim()) {
+        blocks.push({
+          type: "text",
+          text: role === "user" ? stripUserInput(part.text) : part.text,
+        });
+      }
     } else if (type === "thinking" || type === "reasoning") {
       const value = part.thinking ?? part.text;
       const cleaned = cleanReasoningText(value);
-      if (cleaned) thinking.push(cleaned);
+      if (cleaned) blocks.push({ type: "thinking", thinking: cleaned });
     } else if (type === "tool-call" || type === "tool_use" || type === "tool-call-delta") {
-      tools.push({
+      blocks.push({
+        type: "tool-call",
         toolName: String(part.toolName ?? part.name ?? "tool"),
         input: part.input ?? part.args ?? part.arguments,
       });
     } else if (type === "tool-result" || type === "tool_result") {
-      tools.push({
+      blocks.push({
+        type: "tool-result",
         toolName: String(part.toolName ?? part.name ?? "tool"),
         output: part.output ?? part.content ?? part.result,
         isError: part.isError === true,
       });
     } else if (typeof part.text === "string" && part.text.trim()) {
-      texts.push(role === "user" ? stripUserInput(part.text) : part.text);
+      blocks.push({
+        type: "text",
+        text: role === "user" ? stripUserInput(part.text) : part.text,
+      });
     }
   }
 
   // Phase 0 R3: tools may also sit on the content object (DB-persisted turn)
   // rather than as content blocks.
-  if (tools.length === 0 && Array.isArray(contentRecord?.tools)) {
+  const contentRecord = asRecord(inner.content);
+  if (blocks.filter((b) => b.type === "tool-call" || b.type === "tool-result").length === 0
+      && Array.isArray(contentRecord?.tools)) {
     for (const rawTool of contentRecord.tools) {
       const t = asRecord(rawTool);
       if (t && typeof t.toolName === "string") {
-        tools.push({
+        blocks.push({
+          type: "tool-call",
           toolName: t.toolName,
           input: t.input,
-          output: t.output,
-          isError: t.isError === true,
+          ...(t.output !== undefined ? { output: t.output, isError: t.isError === true } : {}),
         });
       }
     }
   }
 
-  // Fix 4: don't filter out empty-content messages — return them with empty
-  // content so user messages aren't lost from transcripts.
-  if (texts.length === 0 && thinking.length === 0 && tools.length === 0 && !scanEvents?.length) {
-    return {
-      id: typeof m.id === "string" ? m.id : randomUUID(),
-      role,
-      content: "",
-      thinking: [],
-      tools: [],
-    };
+  // Append sibling scanEvents as scan-event blocks (preserves order after other blocks).
+  if (siblingScanEvents && siblingScanEvents.length > 0) {
+    for (const se of siblingScanEvents) {
+      blocks.push({
+        type: "scan-event",
+        eventType: se.type,
+        message: se.message,
+        ...(se.taskId !== undefined ? { taskId: se.taskId } : {}),
+        ...(se.progress !== undefined ? { progress: se.progress } : {}),
+        ...(se.currentStep !== undefined ? { currentStep: se.currentStep } : {}),
+        ...(se.findings !== undefined ? { findings: se.findings } : {}),
+      });
+    }
   }
 
+  // Fix 4: don't filter out empty-content messages — return them with empty
+  // blocks so user messages aren't lost from transcripts.
   return {
     id: typeof m.id === "string" ? m.id : randomUUID(),
     role,
-    content: texts.join("\n\n"),
-    thinking,
-    tools,
-    ...(scanEvents && scanEvents.length > 0 ? { scanEvents } : {}),
+    blocks,
   };
 }
 
@@ -4730,7 +4784,8 @@ export function normalizeClineMessagesForUi(
 
 // B-3: map a stored transcript row back to a Cline MessageWithMetadata so the
 // UI can render it identically to a live Cline read.
-// Phase 0 R3/R4: carry tools + scanEvents from persisted content into blocks.
+// Phase 0 R3/R4: carry blocks from persisted content. Handles both old-format
+// { text, thinking, tools, scanEvents } and new-format { blocks: [...] } rows.
 function clineAgentMessageToMessage(row: {
   id: string;
   role: string;
@@ -4742,8 +4797,24 @@ function clineAgentMessageToMessage(row: {
     thinking?: string[];
     tools?: ToolCall[];
     scanEvents?: ScanEvent[];
+    blocks?: unknown[];
   } | null;
-  // Handle both object content { text, thinking } and plain string content.
+
+  // New-format rows: content.blocks already holds ordered blocks.
+  if (c?.blocks && Array.isArray(c.blocks)) {
+    const blocks: ContentBlock[] = [];
+    for (const b of c.blocks) {
+      blocks.push(b as unknown as ContentBlock);
+    }
+    return {
+      id: row.id,
+      role: row.role as "user" | "assistant",
+      content: blocks,
+      createdAt: row.createdAt,
+    } as MessageWithMetadata;
+  }
+
+  // Old-format rows: build blocks from { text, thinking, tools, scanEvents }.
   const text = typeof row.content === "string" ? row.content : c?.text ?? "";
   const thinking = c?.thinking ?? [];
   const tools = Array.isArray(c?.tools) ? c.tools : [];
@@ -4765,13 +4836,21 @@ function clineAgentMessageToMessage(row: {
       } as unknown as ContentBlock);
     }
   }
+  for (const se of scanEvents) {
+    blocks.push({
+      type: "scan-event",
+      eventType: se.type,
+      message: se.message,
+      ...(se.taskId !== undefined ? { taskId: se.taskId } : {}),
+      ...(se.progress !== undefined ? { progress: se.progress } : {}),
+      ...(se.currentStep !== undefined ? { currentStep: se.currentStep } : {}),
+      ...(se.findings !== undefined ? { findings: se.findings } : {}),
+    } as unknown as ContentBlock);
+  }
   return {
     id: row.id,
     role: row.role as "user" | "assistant",
     content: blocks,
-    // Sibling fields the normalizer also reads (content object path).
-    ...(tools.length > 0 ? { tools } : {}),
-    ...(scanEvents.length > 0 ? { scanEvents } : {}),
     createdAt: row.createdAt,
   } as MessageWithMetadata;
 }

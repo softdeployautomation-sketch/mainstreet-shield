@@ -24,13 +24,26 @@ interface ScanEvent {
   findings?: unknown[];
 }
 
+interface MessageBlock {
+  type: "text" | "thinking" | "tool-call" | "tool-result" | "scan-event";
+  text?: string;
+  thinking?: string;
+  toolName?: string;
+  input?: unknown;
+  output?: unknown;
+  isError?: boolean;
+  eventType?: string;
+  message?: string;
+  taskId?: string;
+  progress?: number | string;
+  currentStep?: string;
+  findings?: unknown[];
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
-  content: string;
-  thinking?: string[];
-  tools?: ToolCall[];
-  scanEvents?: ScanEvent[];
+  blocks: MessageBlock[];
 }
 
 interface PendingFile {
@@ -147,10 +160,11 @@ export function AgentChat() {
                   ({
                     id: m.id ?? Math.random().toString(36),
                     role: m.role,
-                    content: typeof m.content === "string" ? m.content : "",
-                    thinking: m.thinking,
-                    tools: Array.isArray(m.tools) ? m.tools : undefined,
-                    scanEvents: Array.isArray(m.scanEvents) ? m.scanEvents : undefined,
+                    blocks: Array.isArray(m.blocks)
+                      ? m.blocks
+                      : m.content
+                        ? [{ type: "text", text: m.content }]
+                        : [],
                   } as Message),
               );
               setMessages(msgs);
@@ -211,10 +225,11 @@ export function AgentChat() {
             ({
               id: m.id ?? Math.random().toString(36),
               role: m.role,
-              content: typeof m.content === "string" ? m.content : "",
-              thinking: m.thinking,
-              tools: Array.isArray(m.tools) ? m.tools : undefined,
-              scanEvents: Array.isArray(m.scanEvents) ? m.scanEvents : undefined,
+              blocks: Array.isArray(m.blocks)
+                ? m.blocks
+                : m.content
+                  ? [{ type: "text", text: m.content }]
+                  : [],
             } as Message),
         );
         setMessages(msgs);
@@ -299,7 +314,7 @@ export function AgentChat() {
     const userMsg: Message = {
       id: Math.random().toString(36).slice(2, 10),
       role: "user",
-      content: text,
+      blocks: [{ type: "text", text }],
     };
     setMessages((prev) => [...prev, userMsg]);
     scrollBottom();
@@ -337,18 +352,13 @@ export function AgentChat() {
         return;
       }
 
-      let accumulatedContent = "";
-      let accumulatedThinking: string[] = [];
-      let accumulatedTools: ToolCall[] = [];
-      let accumulatedScanEvents: ScanEvent[] = [];
+      let accumulatedBlocks: MessageBlock[] = [];
 
       // Optimistically add the assistant message so streaming can update it in place.
       const assistantMsg: Message = {
         id: assistantId,
         role: "assistant",
-        content: "",
-        thinking: [],
-        tools: [],
+        blocks: [],
       };
       setMessages((prev) => [...prev, assistantMsg]);
 
@@ -405,9 +415,23 @@ export function AgentChat() {
             scanEvents?: ScanEvent[];
           };
 
+          const cleanReasoning = (raw: string): string => {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed.reasoning === "string") {
+                return parsed.reasoning;
+              }
+              if (parsed && typeof parsed.text === "string") {
+                return parsed.text;
+              }
+              return "";
+            } catch {
+              return raw.trim();
+            }
+          };
+
           if (eventType === "content") {
             if (typeof p.delta === "string") {
-              // Defense: never render serialized SDK protocol events as text.
               const looksLikeProtocolEvent = (() => {
                 const s = p.delta.trimStart();
                 if (!s.startsWith("{")) return false;
@@ -420,76 +444,59 @@ export function AgentChat() {
                 }
               })();
               if (looksLikeProtocolEvent) continue;
-              accumulatedContent += p.delta;
+              const last = accumulatedBlocks[accumulatedBlocks.length - 1];
+              if (last && last.type === "text") {
+                last.text += p.delta;
+              } else {
+                accumulatedBlocks.push({ type: "text", text: p.delta });
+              }
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: accumulatedContent } : m,
+                  m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
                 ),
               );
               scrollBottom();
             }
-          }
-
-          // Helper: strip raw JSON leaked by Cline SDK when it sends the whole
-          // content_start event as the reasoning string instead of just the text.
-          // Returns empty string for raw JSON objects that carry no readable text,
-          // so empty thinking blocks don't render.
-          const cleanReasoning = (raw: string): string => {
-            try {
-              const parsed = JSON.parse(raw);
-              if (parsed && typeof parsed.reasoning === "string") {
-                return parsed.reasoning;
-              }
-              if (parsed && typeof parsed.text === "string") {
-                return parsed.text;
-              }
-              // JSON object with no readable text — suppress
-              return "";
-            } catch {
-              // not JSON — use as-is, but trim whitespace
-              return raw.trim();
-            }
-          };
-
-          if (eventType === "thinking") {
+          } else if (eventType === "thinking") {
             if (typeof p.reasoning === "string") {
               const cleaned = cleanReasoning(p.reasoning);
               if (cleaned.trim()) {
-                accumulatedThinking.push(cleaned);
+                const last = accumulatedBlocks[accumulatedBlocks.length - 1];
+                if (last && last.type === "thinking") {
+                  last.thinking = (last.thinking ?? "") + cleaned;
+                } else {
+                  accumulatedBlocks.push({ type: "thinking", thinking: cleaned });
+                }
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, thinking: [...accumulatedThinking] }
-                      : m,
+                    m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
                   ),
                 );
                 scrollBottom();
               }
             }
           } else if (eventType === "content_start") {
-            // T2: server sends content_start with { contentType: "reasoning", reasoning: "..." }
             if (p.contentType === "reasoning" && typeof p.reasoning === "string") {
               const cleaned = cleanReasoning(p.reasoning);
               if (cleaned.trim()) {
-                accumulatedThinking.push(cleaned);
+                const last = accumulatedBlocks[accumulatedBlocks.length - 1];
+                if (last && last.type === "thinking") {
+                  last.thinking = (last.thinking ?? "") + cleaned;
+                } else {
+                  accumulatedBlocks.push({ type: "thinking", thinking: cleaned });
+                }
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, thinking: [...accumulatedThinking] }
-                      : m,
+                    m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
                   ),
                 );
                 scrollBottom();
               }
             }
           } else if (eventType === "iteration_start") {
-            // T2: ignore — no UI output needed
           } else if (eventType === "tool-call") {
-            // FIX-E: push a placeholder tool-call entry; the matching
-            // tool-result will merge its output into this same entry so each
-            // tool execution renders as a single ToolCard (input + output),
-            // not two disconnected cards.
-            accumulatedTools.push({
+            accumulatedBlocks.push({
+              type: "tool-call",
               toolName: p.toolName ?? "tool",
               input: p.input,
               output: undefined,
@@ -497,16 +504,15 @@ export function AgentChat() {
             });
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
+                m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
               ),
             );
             scrollBottom();
           } else if (eventType === "tool-result") {
-            // FIX-E: merge output into the last matching tool-call entry
-            // (same toolName, no output yet) so input+output stay paired.
-            const merged = [...accumulatedTools];
+            const merged = [...accumulatedBlocks];
             for (let i = merged.length - 1; i >= 0; i--) {
               if (
+                merged[i].type === "tool-call" &&
                 merged[i].toolName === p.toolName &&
                 merged[i].output === undefined
               ) {
@@ -514,14 +520,15 @@ export function AgentChat() {
                   ...merged[i],
                   output: p.output,
                   isError: p.isError,
+                  type: "tool-result",
                 };
                 break;
               }
             }
-            accumulatedTools = merged;
+            accumulatedBlocks = merged;
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId ? { ...m, tools: [...accumulatedTools] } : m,
+                m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
               ),
             );
             scrollBottom();
@@ -531,8 +538,9 @@ export function AgentChat() {
             eventType === "scan_completed" ||
             eventType === "scan_failed"
           ) {
-            accumulatedScanEvents.push({
-              type: eventType,
+            accumulatedBlocks.push({
+              type: "scan-event",
+              eventType,
               message: p.message ?? "",
               ...(p.taskId !== undefined ? { taskId: p.taskId } : {}),
               ...(p.progress !== undefined ? { progress: p.progress } : {}),
@@ -541,33 +549,27 @@ export function AgentChat() {
             });
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId
-                  ? { ...m, scanEvents: [...accumulatedScanEvents] }
-                  : m,
+                m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
               ),
             );
             scrollBottom();
           } else if (eventType === "done") {
-            setMessages((prev) => {
-              return prev.map((m) =>
+            setMessages((prev) =>
+              prev.map((m) =>
                 m.id === assistantId
                   ? {
                       ...m,
-                      content: p.response ?? accumulatedContent,
-                      // FIX-E: keep accumulated thinking visible after the
-                      // stream completes instead of wiping it (was: thinking: []).
-                      thinking: accumulatedThinking,
-                      tools: accumulatedTools,
-                      scanEvents: p.scanEvents ?? accumulatedScanEvents,
+                      blocks: p.response
+                        ? [...accumulatedBlocks, { type: "text", text: p.response }]
+                        : [...accumulatedBlocks],
                     }
                   : m,
-              );
-            });
+              ),
+            );
             if (p.sessionId) {
               const newSessionId = p.sessionId;
               setSessionId(newSessionId);
               try { localStorage.setItem("mss_last_session", newSessionId); } catch {}
-              // T1: append new session to local list, dedupe by id
               setSessions((prev) => {
                 if (prev.some((s) => s.id === newSessionId)) return prev;
                 return [
@@ -580,46 +582,38 @@ export function AgentChat() {
                   },
                 ];
               });
-              // Refresh from DB to reflect title/status after creation
               await fetchSessions();
             }
             if (p.sessionId && !sessionTitle) setSessionTitle(text.slice(0, 60));
             scrollBottom();
           } else if (eventType === "error") {
-            // Only surface "Chat failed" if nothing was actually delivered this stream.
-            // If content/thinking/tools/scanEvents were already accumulated, the agent
-            // responded — suppress the false failure banner.
-            const nothingDelivered =
-              !accumulatedContent &&
-              accumulatedThinking.length === 0 &&
-              accumulatedTools.length === 0 &&
-              accumulatedScanEvents.length === 0;
+            const nothingDelivered = accumulatedBlocks.length === 0;
             if (nothingDelivered) {
               setError(p.message || "Chat failed");
             } else {
-              // stream ended with an error event after content — clear thinking so the
-              // MODEL THINKING panel resolves cleanly instead of staying stuck
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId ? { ...m, thinking: [] } : m,
+                  m.id === assistantId ? { ...m, blocks: [] } : m,
                 ),
               );
             }
           } else {
-            // Catch-all: unknown event types — try to extract any reasoning text
             const maybeReasoning = (p as { reasoning?: string; text?: string; content?: string }).reasoning ?? (p as { reasoning?: string; text?: string; content?: string }).text;
             if (typeof maybeReasoning === "string") {
               const cleaned = cleanReasoning(maybeReasoning);
               if (cleaned.trim()) {
-                accumulatedThinking.push(cleaned);
+                const last = accumulatedBlocks[accumulatedBlocks.length - 1];
+                if (last && last.type === "thinking") {
+                  last.thinking = (last.thinking ?? "") + cleaned;
+                } else {
+                  accumulatedBlocks.push({ type: "thinking", thinking: cleaned });
+                }
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, thinking: [...accumulatedThinking] }
-                      : m,
-                ),
-              );
-              scrollBottom();
+                    m.id === assistantId ? { ...m, blocks: [...accumulatedBlocks] } : m,
+                  ),
+                );
+                scrollBottom();
               }
             }
           }
@@ -631,7 +625,7 @@ export function AgentChat() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: (m.content || "") + "\n\n[stopped]" }
+              ? { ...m, blocks: [...(m.blocks ?? []), { type: "text", text: "\n\n[stopped]" }] }
               : m,
           ),
         );
@@ -732,7 +726,13 @@ export function AgentChat() {
           if (last && last.role === "assistant") {
             return [
               ...prev.slice(0, -1),
-              { ...last, scanEvents: [...(last.scanEvents ?? []), scanEvent] },
+              {
+                ...last,
+                blocks: [
+                  ...(last.blocks ?? []),
+                  { type: "scan-event", eventType: "scan_progress", message: scanEvent.message },
+                ],
+              },
             ];
           }
           return [
@@ -740,8 +740,7 @@ export function AgentChat() {
             {
               id: crypto.randomUUID(),
               role: "assistant",
-              content: scanEvent.message,
-              scanEvents: [scanEvent],
+              blocks: [{ type: "scan-event", eventType: "scan_progress", message: scanEvent.message }],
             },
           ];
         });
@@ -853,34 +852,72 @@ export function AgentChat() {
             key={msg.id}
             className={`flex flex-col gap-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            {msg.role === "assistant" && msg.thinking && msg.thinking.length > 0 && (
-              <ToolCard toolName="thinking" input={msg.thinking} output={msg.thinking.join("\n")} defaultOpen />
-            )}
-            {msg.role === "assistant" && msg.tools && msg.tools.length > 0 && (
+            {msg.role === "assistant" && (
               <>
-                {msg.tools.map((tool, i) => (
-                  <ToolCard
-                    key={i}
-                    toolName={tool.toolName}
-                    input={tool.input}
-                    output={tool.output}
-                    isError={tool.isError}
-                  />
-                ))}
-                {msg.scanEvents && msg.scanEvents.length > 0 && (
-                  <ScanEventCard events={msg.scanEvents} />
-                )}
+                {msg.blocks.map((block, i) => {
+                  if (block.type === "thinking") {
+                    return (
+                      <ToolCard
+                        key={i}
+                        toolName="thinking"
+                        input={block.thinking}
+                        output={block.thinking}
+                      />
+                    );
+                  }
+                  if (block.type === "tool-call" || block.type === "tool-result") {
+                    return (
+                      <ToolCard
+                        key={i}
+                        toolName={block.toolName ?? "tool"}
+                        input={block.input}
+                        output={block.output}
+                        isError={block.isError}
+                      />
+                    );
+                  }
+                  if (block.type === "scan-event") {
+                    return (
+                      <ScanEventCard
+                        key={i}
+                        events={[
+                          {
+                            type: (block.eventType ?? "scan_progress") as
+                              | "scan_started"
+                              | "scan_progress"
+                              | "scan_completed"
+                              | "scan_failed",
+                            message: block.message ?? "",
+                          },
+                        ]}
+                      />
+                    );
+                  }
+                  if (block.type === "text") {
+                    return (
+                      <div
+                        key={i}
+                        className={`rounded-xl px-3 py-2 text-sm max-w-[80%] bg-bg-elevated border border-border text-fg`}
+                      >
+                        <ChatMarkdown content={block.text ?? ""} />
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
               </>
             )}
-            <div
-              className={`rounded-xl px-3 py-2 text-sm max-w-[80%] ${
-                msg.role === "user"
-                  ? "bg-brand-600 text-white ml-auto"
-                  : "bg-bg-elevated border border-border text-fg"
-              }`}
-            >
-              {msg.content ? <ChatMarkdown content={msg.content} /> : null}
-            </div>
+            {msg.role === "user" && (
+              <div
+                className={`rounded-xl px-3 py-2 text-sm max-w-[80%] bg-brand-600 text-white ml-auto`}
+              >
+                {msg.blocks
+                  .filter((b) => b.type === "text")
+                  .map((b, i) => (
+                    <ChatMarkdown key={i} content={b.text ?? ""} />
+                  ))}
+              </div>
+            )}
           </div>
         ))}
         {error && (
