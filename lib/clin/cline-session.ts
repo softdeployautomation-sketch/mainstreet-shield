@@ -4467,73 +4467,10 @@ export async function sendClineMessage(
       userFiles: input.userFiles,
     });
   } catch (err) {
-    if (isClineAuthError(err)) {
-      // Force-refresh the OAuth token — it may have expired mid-session
-      // (e.g. during a long scan turn). Don't clear credentials; that causes
-      // an infinite re-auth loop. Retry once with a fresh token via a resumed
-      // startClineSession so ClineCore gets the new API key.
-      const refreshed = await getValidClineOAuthToken(input.userId, {
-        forceRefresh: true,
-      });
-      if (refreshed) {
-        try {
-          const resumed = await startClineSession(
-            {
-              userId: input.userId,
-              sessionId: input.sessionId,
-              prompt: input.prompt,
-              userImages: input.userImages,
-              userFiles: input.userFiles,
-              resume: true,
-            },
-            onEvent,
-          );
-          return {
-            sessionId: resumed.sessionId || input.sessionId,
-            response: resumed.response,
-            thinking: resumed.thinking,
-            status: resumed.status,
-            error: resumed.error,
-            clineReady: resumed.clineReady,
-          };
-        } catch (resumeErr) {
-          if (isClineAuthError(resumeErr)) {
-            return {
-              sessionId: input.sessionId,
-              response: "",
-              thinking: [],
-              status: "failed",
-              error:
-                resumeErr instanceof Error ? resumeErr.message : "cline_auth_error",
-              clineReady: false,
-            };
-          }
-          return {
-            sessionId: input.sessionId,
-            response: "",
-            thinking: [],
-            status: "failed",
-            error:
-              resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
-            clineReady: true,
-          };
-        }
-      }
-      // Fall through to the original auth error return below
-      return {
-        sessionId: input.sessionId,
-        response: "",
-        thinking: [],
-        status: "failed",
-        error: err instanceof Error ? err.message : "cline_auth_error",
-        clineReady: false,
-      };
-    }
-    // Phase 0 R1: cold resume — ClineCore lost the session (restart / not
-    // resident), or any non-auth send failure. Rebuild with DB transcript as
-    // initialMessages, then run this turn. Chat route must NOT call start
-    // again (that was amnesia + R2 double-persist risk); we return the
-    // completed result here.
+    // Any send failure (auth or not): cold resume via startClineSession,
+    // which already handles credential checking and force-refresh internally.
+    // Do NOT short-circuit on auth errors — that skips cold resume and
+    // returns cline_disconnected even when a fresh token could be obtained.
     try {
       const resumed = await startClineSession(
         {
@@ -4555,12 +4492,24 @@ export async function sendClineMessage(
         clineReady: resumed.clineReady,
       };
     } catch (resumeErr) {
+      if (isClineAuthError(resumeErr)) {
+        return {
+          sessionId: input.sessionId,
+          response: "",
+          thinking: [],
+          status: "failed",
+          error:
+            resumeErr instanceof Error ? resumeErr.message : "cline_auth_error",
+          clineReady: false,
+        };
+      }
       return {
         sessionId: input.sessionId,
         response: "",
         thinking: [],
         status: "failed",
-        error: resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
+        error:
+          resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
         clineReady: true,
       };
     }
